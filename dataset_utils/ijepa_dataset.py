@@ -1,13 +1,11 @@
 from pathlib import Path
-from typing import List, Literal, Tuple, Union
+from typing import List, Literal, Union
 
 import pytorch_lightning as pl
 import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-
-# from utils.types import ensure_tuple
 
 
 class ImageDataset(Dataset):

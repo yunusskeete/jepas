@@ -26,17 +26,17 @@ class VisionTransformer(nn.Module):
         **kwargs: Any,
     ):
         super().__init__()
-        self.img_size = ensure_tuple(img_size)  # Unique
-        self.patch_size = ensure_tuple(patch_size)  # Redefined in IJEPA
+        self.img_size = ensure_tuple(img_size)
+        self.patch_size = ensure_tuple(patch_size)
 
-        self.num_frames = num_frames  # Unique
-        self.tubelet_size = tubelet_size  # Unique
-        self.is_video = num_frames > 1  # Unique
+        self.num_frames = num_frames
+        self.tubelet_size = tubelet_size
+        self.is_video = num_frames > 1
 
-        self.embed_dim = embed_dim  # Redefined in IJEPA
-        self.num_heads = num_heads  # Unique
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
 
-        self.patch_embed: nn.Module = (  # Unique
+        self.patch_embed: nn.Module = (
             PatchEmbed(
                 img_size=img_size,
                 patch_size=patch_size,
@@ -52,11 +52,11 @@ class VisionTransformer(nn.Module):
                 embed_dim=embed_dim,
             )
         )
-        self.patch_dim: Tuple[int, int] = (  # Redefined in IJEPA
+        self.patch_dim: Tuple[int, int] = (
             self.patch_embed.patch_shape[-2],
             self.patch_embed.patch_shape[-1],
         )
-        self.num_patches: int = (  # Unique
+        self.num_patches: int = (
             self.patch_embed.patch_shape[-2] * self.patch_embed.patch_shape[-1]
             if not self.is_video
             else (
@@ -68,17 +68,13 @@ class VisionTransformer(nn.Module):
             )
         )
 
-        self.pos_embedding = nn.Parameter(
-            torch.randn(1, self.num_patches, embed_dim)
-        )  # Unique
+        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches, embed_dim))
 
-        self.post_emb_norm = (
-            nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
-        )  # Unique
+        self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
 
-        self.layer_dropout = layer_dropout  # Unique
+        self.layer_dropout = layer_dropout
 
-        self.encoder = Encoder(  # student encoder (Unique)
+        self.encoder = Encoder(  # student encoder
             dim=embed_dim,
             heads=num_heads,
             depth=enc_depth,

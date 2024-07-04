@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Literal, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -9,14 +9,13 @@ from dataset_utils import generate_context_patches, generate_target_patches
 from utils.types import Number
 
 from .base_model import JEPA_base
-from .vit import vit_base, vit_huge, vit_large, vit_nano, vit_small, vit_tiny
 
 
 class IJEPA(JEPA_base, pl.LightningModule):
     def __init__(
         self,
         decoder_depth: int = 6,
-        lr: float = 1e-6,
+        lr: float = 1e-3,
         weight_decay: float = 0.05,
         target_aspect_ratio: Tuple[float, float] = (0.75, 1.5),
         target_scale_interval: Tuple[float, float] = (0.15, 0.2),
@@ -37,20 +36,20 @@ class IJEPA(JEPA_base, pl.LightningModule):
         self.save_hyperparameters()
 
         # Define hyperparameters
-        self.lr = lr  # Unique
-        self.weight_decay = weight_decay  # Unique
-        self.m = m  # momentum (Unique)
-        self.target_aspect_ratio = target_aspect_ratio  # Unique
-        self.target_scale_interval = target_scale_interval  # Unique
-        self.context_aspect_ratio = context_aspect_ratio  # Unique
-        self.context_scale = context_scale  # Unique
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.m = m  # momentum
+        self.target_aspect_ratio = target_aspect_ratio
+        self.target_scale_interval = target_scale_interval
+        self.context_aspect_ratio = context_aspect_ratio
+        self.context_scale = context_scale
 
         # self.num_tokens = (img_size // patch_size) ** 2
 
-        self.m_start_end = m_start_end  # Unique
+        self.m_start_end = m_start_end
 
         # Define loss
-        self.criterion = nn.MSELoss()  # Unique
+        self.criterion = nn.MSELoss()
 
     def forward(
         self,

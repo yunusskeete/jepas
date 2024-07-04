@@ -22,9 +22,7 @@ if __name__ == "__main__":
         dataset_path=dataset_path, batch_size=32, pin_memory=False
     )
 
-    model: IJEPA = IJEPA(
-        # lr=1e-3,
-    )
+    model = IJEPA()
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)

@@ -1,13 +1,8 @@
 import copy
-from typing import Any, Callable, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, List, Literal, Tuple, Union
 
 import torch
 import torch.nn as nn
-from einops import repeat
-from x_transformers import Encoder
-
-from utils.tensors import validate_tensor_dimensions
-from utils.types import Number
 
 from .predictor import Predictor
 from .vit import VisionTransformer
@@ -23,18 +18,16 @@ class JEPA_base(VisionTransformer):
     ):
         super().__init__(**kwargs)
         self.num_target_blocks = num_target_blocks  # Number of patches (Unique)
-        self.mode = mode  # Unique
+        self.mode = mode
 
-        self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))  # Unique
+        self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
         nn.init.trunc_normal_(self.mask_token, 0.02)
 
         self.norm = nn.LayerNorm(self.embed_dim)
 
-        self.teacher_encoder = copy.deepcopy(  # Unique
-            self.encoder  # student encoder
-        ).cuda()
+        self.teacher_encoder = copy.deepcopy(self.encoder).cuda()  # student encoder
 
-        self.predictor = Predictor(  # Unique
+        self.predictor = Predictor(
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
             depth=decoder_depth,
