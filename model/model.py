@@ -12,14 +12,9 @@ from .base_model import JEPA_base
 from .vit import vit_base, vit_huge, vit_large, vit_nano, vit_small, vit_tiny
 
 
-class IJEPA(pl.LightningModule):
+class IJEPA(JEPA_base, pl.LightningModule):
     def __init__(
         self,
-        img_size: int = 224,
-        patch_size: int = 16,
-        vit: Literal[
-            vit_nano, vit_tiny, vit_small, vit_base, vit_large, vit_huge
-        ] = vit_nano,
         decoder_depth: int = 6,
         lr: float = 1e-6,
         weight_decay: float = 0.05,
@@ -27,48 +22,43 @@ class IJEPA(pl.LightningModule):
         target_scale_interval: Tuple[float, float] = (0.15, 0.2),
         context_aspect_ratio: Number = 1,
         context_scale: Tuple[float, float] = (0.85, 1.0),
-        num_target_blocks: int = 4,  # number of different target blocks
+        num_target_blocks: int = 4,  # number of different target blocks per image
         m: float = 0.996,  # momentum
-        m_start_end: Tuple[float, float] = (0.996, 1.0),
+        m_start_end: Tuple[float, float] = (0.996, 1.0),  # momentum
+        **kwargs,
     ):
-        super().__init__()
+        pl.LightningModule.__init__(self)
+        JEPA_base.__init__(
+            self,
+            decoder_depth=decoder_depth,
+            num_target_blocks=num_target_blocks,
+            **kwargs,
+        )
         self.save_hyperparameters()
 
-        # define models
-        self.vision_transformer = vit(img_size=img_size, patch_size=patch_size)
-        self.model = JEPA_base(
-            vision_transformer=self.vision_transformer,
-            pred_depth=decoder_depth,
-            num_target_blocks=num_target_blocks,
-        )
+        # Define hyperparameters
+        self.lr = lr  # Unique
+        self.weight_decay = weight_decay  # Unique
+        self.m = m  # momentum (Unique)
+        self.target_aspect_ratio = target_aspect_ratio  # Unique
+        self.target_scale_interval = target_scale_interval  # Unique
+        self.context_aspect_ratio = context_aspect_ratio  # Unique
+        self.context_scale = context_scale  # Unique
 
-        # define hyperparameters
-        self.num_target_blocks = num_target_blocks
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.m = m
-        self.target_aspect_ratio = target_aspect_ratio
-        self.target_scale_interval = target_scale_interval
-        self.context_aspect_ratio = context_aspect_ratio
-        self.context_scale = context_scale
-        self.embed_dim = self.vision_transformer.embed_dim
-        self.patch_dim = self.vision_transformer.patch_dim
-        self.patch_size = self.vision_transformer.patch_size
+        # self.num_tokens = (img_size // patch_size) ** 2
 
-        self.num_tokens = (img_size // patch_size) ** 2
+        self.m_start_end = m_start_end  # Unique
 
-        self.m_start_end = m_start_end
-
-        # define loss
-        self.criterion = nn.MSELoss()
+        # Define loss
+        self.criterion = nn.MSELoss()  # Unique
 
     def forward(
         self,
         x: torch.Tensor,
-        target_aspect_ratio: Number,
-        target_scale: Number,
+        target_aspect_ratio: float,
+        target_scale: float,
         context_aspect_ratio: Number,
-        context_scale: Number,
+        context_scale: float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         target_patches: List[List[int]]
         all_patches: List[int]
@@ -86,8 +76,8 @@ class IJEPA(pl.LightningModule):
             target_patches=all_patches,
         )
 
-        return self.model(
-            x=x,
+        return self.forward_base(
+            x=x,  # (batch_size, img_channels = RGB = 3, img_height, img_width)
             target_patches=target_patches,
             context_patches=context_patches,
         )
@@ -100,9 +90,10 @@ class IJEPA(pl.LightningModule):
             m (float): Momentum coefficient for the exponential moving average update.
         """
         # Disable layers like dropout and batch normalization
-        student_model: nn.Module = self.model.vision_transformer.encoder.eval()
-        teacher_model: nn.Module = self.model.teacher_encoder.eval()
+        student_model: nn.Module = self.encoder.eval()  # student encoder
+        teacher_model: nn.Module = self.teacher_encoder.eval()
 
+        # pylint: disable=pointless-string-statement
         """
         Manual parameter updates:
         Manually update the teacher's parameters using a momentum term, ensuring the teacher model's parameters are a smoothed version of the student model's parameters - thus reducing the noise and fluctuations in the learning process.
@@ -120,40 +111,50 @@ class IJEPA(pl.LightningModule):
 
     def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         # Generate random target and context aspect ratio and scale
-        target_aspect_ratio = np.random.uniform(
+        target_aspect_ratio: float = np.random.uniform(
             self.target_aspect_ratio[0], self.target_aspect_ratio[1]
         )
         target_scale: float = np.random.uniform(
             low=self.target_scale_interval[0], high=self.target_scale_interval[1]
         )
 
-        context_scale = np.random.uniform(self.context_scale[0], self.context_scale[1])
+        context_scale: float = np.random.uniform(
+            self.context_scale[0], self.context_scale[1]
+        )
 
-        y_student, y_teacher = self(
-            x=batch,
+        (
+            y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+            y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+        ) = self(
+            x=batch,  # (batch_size, img_channels = RGB = 3, img_height, img_width)
             target_aspect_ratio=target_aspect_ratio,
             target_scale=target_scale,
             context_aspect_ratio=self.context_aspect_ratio,
             context_scale=context_scale,
         )
 
-        loss = self.criterion(y_student, y_teacher)
+        loss: torch.Tensor = self.criterion(y_student, y_teacher)  # TODO: Shape
         self.log("train_loss", loss)
 
         return loss
 
     def validation_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
         # Generate random target and context aspect ratio and scale
-        target_aspect_ratio = np.random.uniform(
+        target_aspect_ratio: float = np.random.uniform(
             self.target_aspect_ratio[0], self.target_aspect_ratio[1]
         )
-        target_scale = np.random.uniform(
+        target_scale: float = np.random.uniform(
             low=self.target_scale_interval[0], high=self.target_scale_interval[1]
         )
 
-        context_scale = np.random.uniform(self.context_scale[0], self.context_scale[1])
+        context_scale: float = np.random.uniform(
+            self.context_scale[0], self.context_scale[1]
+        )
 
-        y_student, y_teacher = self(
+        (
+            y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+            y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+        ) = self(
             x=batch,
             target_aspect_ratio=target_aspect_ratio,
             target_scale=target_scale,
@@ -161,7 +162,7 @@ class IJEPA(pl.LightningModule):
             context_scale=context_scale,
         )
 
-        loss = self.criterion(y_student, y_teacher)
+        loss: torch.Tensor = self.criterion(y_student, y_teacher)  # TODO: Shape
         self.log("val_loss", loss)
 
         return loss
@@ -170,22 +171,22 @@ class IJEPA(pl.LightningModule):
         self, batch: torch.Tensor, batch_idx: int, dataloader_idx: int
     ) -> torch.Tensor:
         # Generate random target and context aspect ratio
-        target_aspect_ratio = np.random.uniform(
+        target_aspect_ratio: float = np.random.uniform(
             self.target_aspect_ratio[0], self.target_aspect_ratio[1]
         )
-        target_scale = np.random.uniform(
+        target_scale: float = np.random.uniform(
             low=self.target_scale_interval[0], high=self.target_scale_interval[1]
         )
 
-        self.model.mode = "test"  # Set model to test mode, therefore forward pass returns only full embedding using the student encoder
+        self.mode = "test"  # Set model to test mode, therefore forward pass returns only full embedding using the student encoder
 
-        return self(
+        return self(  # Return only student embedding
             x=batch,
             target_aspect_ratio=target_aspect_ratio,
             target_scale=target_scale,
             context_aspect_ratio=self.context_aspect_ratio,
             context_scale=1,
-        )  # Return only student embedding
+        )  # (batch_size, num_patches, embed_dim)
 
     def on_after_backward(self) -> None:
         self.update_momentum(self.m)

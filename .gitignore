@@ -2,6 +2,7 @@
 data/
 # Ignore all __pycache__ directories
 **/__pycache__/
+/lightning_logs
 /lightning_logs1
 /lightning_logs2
 

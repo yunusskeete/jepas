@@ -1,4 +1,4 @@
-from typing import Tuple, Union
+from typing import Any, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -23,20 +23,20 @@ class VisionTransformer(nn.Module):
         post_emb_norm: bool = False,
         post_enc_norm: bool = False,
         layer_dropout: float = 0.0,
+        **kwargs: Any,
     ):
         super().__init__()
-        self.img_size = ensure_tuple(img_size)
-        self.patch_size = ensure_tuple(patch_size)
+        self.img_size = ensure_tuple(img_size)  # Unique
+        self.patch_size = ensure_tuple(patch_size)  # Redefined in IJEPA
 
-        self.num_frames = num_frames
-        self.tubelet_size = tubelet_size
-        self.is_video = num_frames > 1
+        self.num_frames = num_frames  # Unique
+        self.tubelet_size = tubelet_size  # Unique
+        self.is_video = num_frames > 1  # Unique
 
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.post_emb_norm = post_emb_norm
+        self.embed_dim = embed_dim  # Redefined in IJEPA
+        self.num_heads = num_heads  # Unique
 
-        self.patch_embed: nn.Module = (
+        self.patch_embed: nn.Module = (  # Unique
             PatchEmbed(
                 img_size=img_size,
                 patch_size=patch_size,
@@ -52,11 +52,11 @@ class VisionTransformer(nn.Module):
                 embed_dim=embed_dim,
             )
         )
-        self.patch_dim: Tuple[int, int] = (
+        self.patch_dim: Tuple[int, int] = (  # Redefined in IJEPA
             self.patch_embed.patch_shape[-2],
             self.patch_embed.patch_shape[-1],
         )
-        self.num_patches: int = (
+        self.num_patches: int = (  # Unique
             self.patch_embed.patch_shape[-2] * self.patch_embed.patch_shape[-1]
             if not self.is_video
             else (
@@ -64,25 +64,32 @@ class VisionTransformer(nn.Module):
                 * self.patch_embed.patch_shape[-1]
                 * (
                     num_frames // self.patch_embed.patch_shape[0]
-                )  # patch_shape[0] = tubelet_size
+                )  # self.patch_embed.patch_shape[0] = tubelet_size
             )
         )
 
-        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches, embed_dim))
+        self.pos_embedding = nn.Parameter(
+            torch.randn(1, self.num_patches, embed_dim)
+        )  # Unique
 
-        self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
+        self.post_emb_norm = (
+            nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
+        )  # Unique
 
-        self.layer_dropout = layer_dropout
-        self.encoder = Encoder(  # student encoder
+        self.layer_dropout = layer_dropout  # Unique
+
+        self.encoder = Encoder(  # student encoder (Unique)
             dim=embed_dim,
             heads=num_heads,
             depth=enc_depth,
             layer_dropout=self.layer_dropout,
         )
 
-        self.post_enc_norm = nn.LayerNorm(embed_dim) if post_enc_norm else nn.Identity()
+        self.post_enc_norm = (
+            nn.LayerNorm(embed_dim) if post_enc_norm else nn.Identity()
+        )  # student encoder
 
-    def forward(self, x: torch.Tensor, skip_encoder=False) -> torch.Tensor:
+    def forward_vit(self, x: torch.Tensor, skip_encoder=False) -> torch.Tensor:
         # Obtain patch embeddings from the input tensor
         x = self.patch_embed(x)  # (batch, num_patches, embed_dim)
 
@@ -113,7 +120,7 @@ def vit_nano(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         embed_dim=64,
         enc_depth=8,
         num_heads=8,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -126,7 +133,7 @@ def vit_tiny(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         embed_dim=192,
         enc_depth=18,
         num_heads=8,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -139,7 +146,7 @@ def vit_small(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         embed_dim=384,
         enc_depth=12,
         num_heads=8,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -152,7 +159,7 @@ def vit_base(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         embed_dim=768,
         enc_depth=12,
         num_heads=12,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -165,7 +172,7 @@ def vit_large(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         embed_dim=1024,
         enc_depth=24,
         num_heads=16,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -178,5 +185,5 @@ def vit_huge(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         embed_dim=1280,
         enc_depth=32,
         num_heads=16,
-        **kwargs
+        **kwargs,
     )

@@ -23,7 +23,7 @@ if __name__ == "__main__":
     )
 
     model: IJEPA = IJEPA(
-        lr=1e-3,
+        # lr=1e-3,
     )
 
     lr_monitor = LearningRateMonitor(logging_interval="step")

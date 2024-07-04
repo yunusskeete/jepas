@@ -1,5 +1,5 @@
 import copy
-from typing import Callable, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Callable, List, Literal, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -13,62 +13,52 @@ from .predictor import Predictor
 from .vit import VisionTransformer
 
 
-class JEPA_base(nn.Module):
+class JEPA_base(VisionTransformer):
     def __init__(
         self,
-        vision_transformer: VisionTransformer,
-        pred_depth: int,
+        decoder_depth: int,
         num_target_blocks: int = 4,
         mode: Literal["test", "train"] = "train",
+        **kwargs: Any,
     ):
-        super().__init__()
-        self.num_target_blocks = num_target_blocks
-        self.mode = mode
+        super().__init__(**kwargs)
+        self.num_target_blocks = num_target_blocks  # Number of patches (Unique)
+        self.mode = mode  # Unique
 
-        self.vision_transformer = vision_transformer
-
-        self.mask_token = nn.Parameter(torch.randn(1, 1, vision_transformer.embed_dim))
+        self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))  # Unique
         nn.init.trunc_normal_(self.mask_token, 0.02)
 
-        self.post_emb_norm = (
-            nn.LayerNorm(vision_transformer.embed_dim)
-            if vision_transformer.post_emb_norm
-            else nn.Identity()
-        )
-        self.norm = nn.LayerNorm(vision_transformer.embed_dim)
+        self.norm = nn.LayerNorm(self.embed_dim)
 
-        self.teacher_encoder = copy.deepcopy(
-            self.vision_transformer.encoder  # student encoder
+        self.teacher_encoder = copy.deepcopy(  # Unique
+            self.encoder  # student encoder
         ).cuda()
 
-        self.predictor = Predictor(
-            embed_dim=vision_transformer.embed_dim,
-            num_heads=vision_transformer.num_heads,
-            depth=pred_depth,
+        self.predictor = Predictor(  # Unique
+            embed_dim=self.embed_dim,
+            num_heads=self.num_heads,
+            depth=decoder_depth,
         )
 
     @torch.no_grad()
     def get_target_blocks(
         self,
-        target_encoder: nn.Module,
         x: torch.Tensor,
         target_patches: List[List[int]],
-        num_target_blocks: int,
     ) -> torch.Tensor:
         """
         Generate target blocks from the input tensor using a target encoder.
 
         Args:
-            target_encoder (nn.Module): The target encoder model.
             x (torch.Tensor): Input tensor to be processed by the target encoder of shape (batch, num_patches, embed_dim).
-            num_target_blocks (int): Number of target blocks to generate.
+            target_patches (List[List[ing]]): TODO
 
         Returns:
             torch.Tensor:
                 - target_block: A tensor containing the generated target blocks.
         """
         # Ensure the target encoder is in evaluation mode
-        target_encoder = target_encoder.eval()  # teacher encoder
+        target_encoder = self.teacher_encoder.eval()
         # Encode the input tensor
         x = target_encoder(x)  # (batch, num_patches, embed_dim)
         x = self.norm(x)  # (batch, num_patches, embed_dim)
@@ -76,7 +66,7 @@ class JEPA_base(nn.Module):
         # Create a list to hold the target blocks
         target_blocks_list: List[torch.Tensor] = []
 
-        for target_block_idx in range(num_target_blocks):
+        for target_block_idx in range(self.num_target_blocks):
             patches = target_patches[target_block_idx]
             # Assign the corresponding encoded values to the target block tensor
             target_blocks_list.append(x[:, patches, :])
@@ -123,7 +113,7 @@ class JEPA_base(nn.Module):
         # Predict each target block separately using the context encoding and mask tokens
         for i in range(num_target_blocks):
             target_masks = self.mask_token.repeat(batch_dim, num_patches, 1)
-            target_pos_embedding = self.vision_transformer.pos_embedding[
+            target_pos_embedding = self.pos_embedding[
                 :, target_patches[i], :
             ]  # NOTE: This includes a temporal dimenion if is_video
             target_masks = target_masks + target_pos_embedding
@@ -140,7 +130,7 @@ class JEPA_base(nn.Module):
 
         return prediction_blocks
 
-    def forward(
+    def forward_base(
         self,
         x: torch.Tensor,
         target_patches: List[List[int]],
@@ -165,20 +155,18 @@ class JEPA_base(nn.Module):
                         - prediction_blocks: Predicted blocks based on the context encoding.
                         - target_blocks: Actual target blocks.
         """
-        x = self.vision_transformer(x, skip_encoder=True)
-        b, n, e = x.shape  # (batch_dim, num_patches, embed_dim)
+        x: torch.Tensor = self.forward_vit(x, skip_encoder=True)
+        b, n, e = x.shape  # (batch_size, num_patches, embed_dim)
 
         # If in test mode, return the full embedding using the student encoder
         if self.mode == "test":
-            return x  # (batch_dim, num_patches, embed_dim)
+            return x  # (batch_size, num_patches, embed_dim)
 
         # Get target embeddings using the target encoder
         target_blocks: torch.Tensor = self.get_target_blocks(
-            target_encoder=self.teacher_encoder,
             x=x,
             target_patches=target_patches,
-            num_target_blocks=self.num_target_blocks,  # Number of patches
-        )  # (num_target_blocks, batch_dim, target_block_size, embed_dim)
+        )  # (num_target_blocks, batch_size, target_block_size, embed_dim)
         m, b, n_t, e = target_blocks.shape
         # TODO: Extend to temporal dimenion if is_video
 
@@ -190,13 +178,13 @@ class JEPA_base(nn.Module):
         b, n_c, e = context_block.shape
 
         context_encoding: torch.Tensor = self.norm(
-            self.vision_transformer.encoder(context_block)  # student encoder
+            self.encoder(context_block)  # student encoder
         )  # (batch_size, num_context_patches, embed_dim)
         b, n_e, e = context_encoding.shape
 
         assert (
             n_c == n_e
-        ), f"The number of context patches in the context_block ({n_c}) does not equal the number of context_patches in the context_encoding ({n_e})."
+        ), f"The number of context patches in the context_block ({n_c}) does not equal the number of context patches in the context_encoding ({n_e})."
 
         prediction_blocks = self.make_predictions(
             num_target_blocks=m,
@@ -206,5 +194,13 @@ class JEPA_base(nn.Module):
             target_patches=target_patches,
             context_encoding=context_encoding,
         )  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+        m, b, n_p, e = prediction_blocks.shape
 
-        return prediction_blocks, target_blocks
+        assert (
+            n_t == n_p
+        ), f"The number of context patches in the target_block ({n_t}) does not equal the number of context patches in the prediction_blocks ({n_p})."
+
+        return (
+            prediction_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+            target_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+        )

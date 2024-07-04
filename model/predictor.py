@@ -22,7 +22,7 @@ class Predictor(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int, depth: int):
         super().__init__()
         # Initialize the transformer-based decoder
-        self.predictor = Decoder(dim=embed_dim, depth=depth, heads=num_heads)
+        self.decoder = Decoder(dim=embed_dim, depth=depth, heads=num_heads)
 
     def forward(
         self, context_encoding: torch.Tensor, target_masks: torch.Tensor
@@ -58,7 +58,7 @@ class Predictor(nn.Module):
             (context_encoding, target_masks), dim=1
         )  # (batch_size, num_context_patches + num_target_patches, embed_dim)
         # Pass the concatenated tensor through the transformer decoder
-        x = self.predictor(
+        x = self.decoder(
             x
         )  # (batch_size, num_context_patches + num_target_patches, embed_dim)
         # Return the output corresponding to target tokens, i.e., the last len(target_masks) tokens
