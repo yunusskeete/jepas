@@ -1,8 +1,10 @@
 import copy
-from typing import Any, List, Literal, Tuple, Union
+from typing import Any, List, Literal, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+
+from utils.types import Number
 
 from .predictor import Predictor
 from .vit import VisionTransformer
@@ -17,7 +19,7 @@ class JEPA_base(VisionTransformer):
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
-        self.num_target_blocks = num_target_blocks  # Number of patches (Unique)
+        self.num_target_blocks = num_target_blocks  # Number of patches
         self.mode = mode
 
         self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
@@ -197,3 +199,62 @@ class JEPA_base(VisionTransformer):
             prediction_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
             target_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
         )
+
+    @staticmethod
+    def randomly_select_patch_start(
+        patch_width: int,
+        patch_height: int,
+        block_width: int,
+        block_height: int,
+        seed: Optional[int] = None,
+    ) -> int:
+        """
+        Randomly selects the starting position of a patch within a given block.
+
+        Parameters:
+        patch_width (int): The width of the patch.
+        patch_height (int): The height of the patch.
+        block_width (int): The width of the block from which the patch is to be extracted.
+        block_height (int): The height of the block from which the patch is to be extracted.
+        seed (Optional[int]): An optional random seed for reproducibility.
+
+        Returns:
+        int: The starting position of the patch within the block, represented as a linear index.
+        """
+        raise NotImplementedError()
+
+    @staticmethod
+    def generate_target_patches(
+        patch_dim: Any,
+        aspect_ratio: Number,
+        scale: Number,
+        num_target_blocks: int,
+    ) -> Tuple[Any]:
+        """
+        Generate target patches for each target block.
+
+        Args:
+            patch_dim (Any): Dimensions of the patches.
+            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
+            scale (Number): Scaling factor for the number of patches in the target block.
+            num_target_blocks (int): Number of target blocks to generate.
+        """
+        raise NotImplementedError()
+
+    @staticmethod
+    def generate_context_patches(
+        patch_dim: Any,
+        aspect_ratio: Number,
+        scale: Number,
+        target_patches: List[Any],
+    ) -> Any:
+        """
+        Generate a list of patch indices for the context block, excluding target patches.
+
+        Args:
+            patch_dim (Any): Dimensions of the patches.
+            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
+            scale (Number): Scaling factor for the number of patches in the context block.
+            target_patches (List[Any]): List containing indices of target patches.
+        """
+        raise NotImplementedError()

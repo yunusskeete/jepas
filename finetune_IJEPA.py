@@ -83,7 +83,7 @@ Finetune IJEPA
 class IJEPA_FT(pl.LightningModule):
     # take pretrained model path, number of classes, learning rate, weight decay, and drop path as input
     def __init__(
-        self, pretrained_model_path, num_classes, lr=1e-3, weight_decay=0, drop_path=0.1
+        self, pretrained_model_path, num_classes, lr=1e-6, weight_decay=0, drop_path=0.1
     ):
 
         super().__init__()
