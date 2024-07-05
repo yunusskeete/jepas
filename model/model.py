@@ -14,7 +14,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
     def __init__(
         self,
         decoder_depth: int = 6,
-        lr: float = 1e-6,
+        lr: float = 1e-3,
         weight_decay: float = 0.05,
         target_aspect_ratio: Tuple[float, float] = (0.75, 1.5),
         target_scale_interval: Tuple[float, float] = (0.15, 0.2),
