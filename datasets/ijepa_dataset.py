@@ -140,7 +140,9 @@ if __name__ == "__main__":
 
     # Example of iterating through the test data
     for image in test_ijepa_loader:
-        print(image.shape)  # Should print torch.Size([32, 3, img_height, img_width])
+        print(
+            f"{image.shape=}"
+        )  # Should print torch.Size([32, 3, img_height, img_width])
         break
 
     dataset = ImageDataModule(
@@ -152,5 +154,7 @@ if __name__ == "__main__":
 
     # Example of iterating through the validation data
     for image in val_dataloader:
-        print(image.shape)  # Should print torch.Size([32, 3, img_height, img_width])
+        print(
+            f"{image.shape=}"
+        )  # Should print torch.Size([32, 3, img_height, img_width])
         break

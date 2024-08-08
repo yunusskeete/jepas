@@ -6,7 +6,7 @@ from pytorch_lightning.callbacks import (  # ModelCheckpoint,
     ModelSummary,
 )
 
-from dataset_utils import ImageDataModule
+from datasets import ImageDataModule
 from model import IJEPA
 
 if __name__ == "__main__":
