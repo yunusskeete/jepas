@@ -98,6 +98,7 @@ class PatchEmbed3D(nn.Module):
             img_size[1] // patch_size[1],
         )
 
+        # Convolutional layer to convert the video into patches
         self.conv = nn.Conv3d(
             in_channels=in_chans,
             out_channels=embed_dim,
