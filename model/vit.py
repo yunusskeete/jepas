@@ -1,4 +1,4 @@
-from typing import Any, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -20,8 +20,8 @@ class VisionTransformer(nn.Module):
         embed_dim: int = 64,
         enc_depth: int = 8,
         num_heads: int = 8,
-        post_emb_norm: bool = False,
-        post_enc_norm: bool = False,
+        post_emb_norm: bool = True,
+        post_enc_norm: bool = True,
         layer_dropout: float = 0.0,
         **kwargs: Any,
     ):
@@ -46,31 +46,38 @@ class VisionTransformer(nn.Module):
             if not self.is_video
             else PatchEmbed3D(
                 img_size=img_size,
+                num_frames=num_frames,
                 patch_size=patch_size,
                 tubelet_size=tubelet_size,
                 in_chans=in_chans,
                 embed_dim=embed_dim,
             )
         )
-        self.patch_dim: Tuple[int, int] = (
-            self.patch_embed.patch_shape[-2],
-            self.patch_embed.patch_shape[-1],
+        # self.patch_dim: Tuple[int, int] = (
+        #     self.patch_embed.patch_shape[-2],
+        #     self.patch_embed.patch_shape[-1],
+        # )
+        self.num_patches: int = int(
+            torch.prod(torch.Tensor(self.patch_embed.patch_shape)).item()
         )
-        self.num_patches: int = (
-            self.patch_embed.patch_shape[-2] * self.patch_embed.patch_shape[-1]
-            if not self.is_video
-            else (
-                self.patch_embed.patch_shape[-2]
-                * self.patch_embed.patch_shape[-1]
-                * (
-                    num_frames // self.patch_embed.patch_shape[0]
-                )  # self.patch_embed.patch_shape[0] = tubelet_size
-            )
-        )
+        # self.num_patches: int = (
+        #     self.patch_embed.patch_shape[-2] * self.patch_embed.patch_shape[-1]
+        #     if not self.is_video
+        #     else (
+        #         self.patch_embed.patch_shape[-2]
+        #         * self.patch_embed.patch_shape[-1]
+        #         * (
+        #             num_frames // self.patch_embed.patch_shape[0]
+        #         )  # self.patch_embed.patch_shape[0] = tubelet_size
+        #     )
+        # )
 
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches, embed_dim))
 
-        self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
+        self.post_emb_norm = post_emb_norm
+        self.post_emb_norm_vit = (
+            nn.LayerNorm(embed_dim) if self.post_emb_norm else nn.Identity()
+        )
 
         self.layer_dropout = layer_dropout
 
@@ -81,28 +88,34 @@ class VisionTransformer(nn.Module):
             layer_dropout=self.layer_dropout,
         )
 
-        self.post_enc_norm = (
-            nn.LayerNorm(embed_dim) if post_enc_norm else nn.Identity()
+        self.post_enc_norm = post_enc_norm
+        self.post_enc_norm_vit = (
+            nn.LayerNorm(embed_dim) if self.post_enc_norm else nn.Identity()
         )  # student encoder
 
-    def forward_vit(self, x: torch.Tensor, skip_encoder=False) -> torch.Tensor:
+    def forward_vit(
+        self,
+        x: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        patch_embed_only: bool = False,
+    ) -> torch.Tensor:
         # Obtain patch embeddings from the input tensor
         x = self.patch_embed(x)  # (batch, num_patches, embed_dim)
 
         # Add positional embeddings to the patch embeddings
         x = x + self.pos_embedding  # (batch, num_patches, embed_dim)
 
-        # Normalize the patch embeddings
-        x = self.post_emb_norm(x)  # (batch, num_patches, embed_dim)
+        # Normalize the patch embeddings (if `self.post_emb_norm`)
+        x = self.post_emb_norm_vit(x)  # (batch, num_patches, embed_dim)
 
-        if skip_encoder:
+        if patch_embed_only:
             return x
 
         # Encode the patch embeddings using the student encoder
-        x = self.encoder(x)  # (batch, num_patches, embed_dim)
+        x = self.encoder(x, attn_mask=attention_mask)  # (batch, num_patches, embed_dim)
 
-        # Normalize the encoded patches
-        x = self.post_enc_norm(x)  # (batch, num_patches, embed_dim)
+        # Normalize the encoded patches (if `self.post_enc_norm`)
+        x = self.post_enc_norm_vit(x)  # (batch, num_patches, embed_dim)
 
         return x
 

@@ -9,6 +9,8 @@ from utils.types import Number
 from .predictor import Predictor
 from .vit import VisionTransformer
 
+# pylint: disable=pointless-string-statement
+
 
 class JEPA_base(VisionTransformer):
     def __init__(
@@ -25,16 +27,16 @@ class JEPA_base(VisionTransformer):
         #     if not self.is_video
         #     else self.tubelet_size * num_target_blocks
         # )  # Number of patches
-        self.mode = mode
+        self.mode = mode.lower()
 
         self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
         nn.init.trunc_normal_(self.mask_token, 0.02)
 
-        self.norm = nn.LayerNorm(self.embed_dim)
+        self.post_enc_norm_jepa = (
+            nn.LayerNorm(self.embed_dim) if self.post_enc_norm else nn.Identity()
+        )
 
-        self.teacher_encoder = copy.deepcopy(
-            self.encoder  # student encoder (ViT)
-        ).cuda()
+        self.teacher_encoder = copy.deepcopy(self.encoder).cuda()  # student encoder
 
         self.predictor = Predictor(
             embed_dim=self.embed_dim,
@@ -49,12 +51,12 @@ class JEPA_base(VisionTransformer):
         target_patches: List[List[int]],
     ) -> torch.Tensor:
         """
-        (Image/video invariant)
+        (Image/video invariant - just ensure that the `target_patches` are right)
         Generate target blocks from the input tensor using a target encoder.
 
         Args:
             x (torch.Tensor): Input tensor to be processed by the target encoder of shape (batch_size, num_patches, embed_dim).
-            target_patches (List[List[int]]): TODO
+            target_patches (List[List[int]]): A list of lists containing indices of target patches for each target block.
 
         Returns:
             torch.Tensor:
@@ -65,20 +67,24 @@ class JEPA_base(VisionTransformer):
 
         # Encode the input tensor
         x = target_encoder(
-            x
-        )  # (batch_size, num_patches, embed_dim), where num_patches = conv_output_height * conv_output_width * (conv_output_t if self.is_video else 1)
-        x = self.norm(x)  # (batch_size, num_patches, embed_dim)
+            x  # NOTE: `x` already contains positional encoding from `self.forward_vit()` pass
+        )  # (batch_size, num_patches, embed_dim), where num_patches = (output_height * output_width) if not self.is_video else (output_t * output_height * output_width)
+        x = self.post_enc_norm_jepa(x)  # (batch_size, num_patches, embed_dim)
 
         # Create a list to hold the target blocks
         target_blocks_list: List[torch.Tensor] = []
 
-        for target_block_idx in range(
-            self.num_target_blocks  # num_target_blocks if not self.is_video else self.tubelet_size * num_target_blocks
-        ):
-            patches = target_patches[target_block_idx]
+        for target_block_idx in range(self.num_target_blocks):
+            target_patches_for_block: List[int] = target_patches[target_block_idx]
 
             # Assign the corresponding encoded values to the target block tensor
-            target_blocks_list.append(x[:, patches, :])
+            target_blocks_list.append(
+                x[
+                    :,  # Include batch dim
+                    target_patches_for_block,  # Include only this patch
+                    :,  # Include all embed dim
+                ]
+            )
 
         # Stack the list of tensors along the new dimension (0)
         target_block: torch.Tensor = torch.stack(
@@ -93,7 +99,7 @@ class JEPA_base(VisionTransformer):
         context_patches: List[int],
     ) -> torch.Tensor:
         """
-        (Image/video invariant)
+        (Image/video invariant - just ensure that the `context_patches` are right)
         Generate a context block from the input tensor, excluding target patches.
 
         Args:
@@ -104,7 +110,13 @@ class JEPA_base(VisionTransformer):
             torch.Tensor: A tensor containing the context block with target patches excluded.
         """
         # Return the context block tensor excluding target patches
-        return x[:, context_patches, :]  # (batch_size, num_patches, embed_dim)
+        context_block: torch.Tensor = x[
+            :,  # Include batch dim
+            context_patches,  # Include only this patch
+            :,  # Include all embed dim
+        ]  # (batch_size, num_patches, embed_dim)
+
+        return context_block
 
     def make_predictions(
         self,
@@ -119,25 +131,39 @@ class JEPA_base(VisionTransformer):
         # Initialize tensor to hold prediction blocks
         prediction_blocks = torch.zeros(
             (num_target_blocks, batch_dim, num_patches, embed_dim)
-        ).cuda()  # TODO: Extend to temporal dimenion if is_video
+        ).cuda()
 
         # Predict each target block separately using the context encoding and mask tokens
-        for i in range(num_target_blocks):
-            target_masks = self.mask_token.repeat(batch_dim, num_patches, 1)
-            target_pos_embedding = self.pos_embedding[
-                :, target_patches[i], :
-            ]  # NOTE: This includes a temporal dimenion if is_video
-            target_masks = target_masks + target_pos_embedding
+        for target_block_idx in range(num_target_blocks):
+            """
+            `target_masks` will be concatenated with `context_encoding` and decoded using a transformer decoder.
+            The self attention mechanism in the decoder is applied to the concatenated sequence in successive blocks,
+            capturing the dependencies within the target sequence (initialised, in `target_masks`, as ones),
+            yielding an understanding of the context of the current token in relation to all other tokens.
+            The prediction blocks are taken as the ouputs of the final decoder block corresponding to the target tokens
+            (`target_masks`).
+            """
+            target_masks: torch.Tensor = self.mask_token.repeat(
+                batch_dim, num_patches, 1
+            )
 
-            # TODO: Do we map input to predictor dimension?
+            # The target tokens (initialised as `target_masks`) must contain positional information.
+            # The `context_encoding` already contains positional encoding from `self.forward_vit()` pass,
+            # thus we must add positional embeddings to the targets
+            target_pos_embedding = self.pos_embedding[
+                :,  # Include batch dim
+                target_patches[target_block_idx],  # Include target patch only
+                :,  # Include all embed dim
+            ]
+            target_masks = target_masks + target_pos_embedding
 
             # Generate prediction for the current target block
             prediction_block = self.predictor(
-                context_encoding, target_masks
+                context_encoding=context_encoding,
+                target_masks=target_masks,
             )  # (batch_size, target_block_size, embed_dim)
-            prediction_blocks[i] = prediction_block
 
-            # TODO: Do we Normalize and project predictor ouputs back to input dimension?
+            prediction_blocks[target_block_idx] = prediction_block
 
         return prediction_blocks
 
@@ -148,14 +174,13 @@ class JEPA_base(VisionTransformer):
         context_patches: List[int],
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         """
+        (Image/video invariant - just ensure that the target/context patches are right)
         Forward pass for generating predictions and targets within the JEPA architecture.
 
         Args:
-            x (torch.Tensor): Input tensor (shape: (batch_size, img_channels = RGB = 3, img_height, img_width)).
-            target_aspect_ratio (Number): Aspect ratio for the target blocks.
-            target_scale (Number): Scale factor for the target blocks.
-            context_aspect_ratio (Number): Aspect ratio for the context block.
-            context_scale (Number): Scale factor for the context block.
+            x (torch.Tensor): Input tensor of shape: (batch_size, channels, img_height, img_width) if not self.is_video else (batch_size, time, channels, img_height, img_width).
+            target_patches (List[List[int]]): A list of lists containing indices of patches for each target block.
+            context_patches (List[int]): A list of patch indices for the context block excluding target patches.
 
         Returns:
             Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
@@ -166,55 +191,264 @@ class JEPA_base(VisionTransformer):
                         - prediction_blocks: Predicted blocks based on the context encoding.
                         - target_blocks: Actual target blocks.
         """
-        x: torch.Tensor = self.forward_vit(x, skip_encoder=True)
-        b, n, e = x.shape  # (batch_size, num_patches, embed_dim)
+        if self.is_video:
+            assert (
+                x.dim() == 5
+            ), f"Video tensor does not have the correct number of dimensions (5), received tensor of shape '{x.shape}'"
+
+            x: torch.Tensor = x.permute(
+                0, 2, 1, 3, 4
+            )  # (batch_size, channels, time, height, width)
+
+        test_mode: bool = self.mode == "test"
+        """
+        Skip (student) encoder (`patch_embed_only=True`) during training
+        as patch embeddings are jointly encoded by the student and the teacher
+        encoder such that the student can learn to predict the teacher
+
+        NOTE: Positional encoding applied to `x` during `self.forward_vit()`
+        """
+        x: torch.Tensor = self.forward_vit(x=x, patch_embed_only=not test_mode)
+        batch_size, num_patches, embed_dim = (
+            x.shape
+        )  # where num_patches = (output_height * output_width) if not self.is_video else (output_t * output_height * output_width)
 
         # If in test mode, return the full embedding using the student encoder
-        if self.mode == "test":
+        if test_mode:
             return x  # (batch_size, num_patches, embed_dim)
 
-        # Get target embeddings using the target encoder
-        target_blocks: torch.Tensor = self.get_target_blocks(
-            x=x,
-            target_patches=target_patches,
-        )  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-        m, b, n_t, e = target_blocks.shape
-        # TODO: Extend to temporal dimenion if is_video
+        ### Get target embeddings using the target encoder
+        target_blocks: torch.Tensor = (
+            self.get_target_blocks(  # NOTE: `target_blocks` contain positional information from `x`, which underwent the `self.forward_vit()` pass
+                x=x,
+                target_patches=target_patches,
+            )
+        )
+        num_target_blocks, batch_size, target_block_size, embed_dim = (
+            target_blocks.shape
+        )
 
-        # Get context embeddings excluding the target patches
-        context_block: torch.Tensor = self.get_context_block(
-            x=x,
-            context_patches=context_patches,
+        ### Get context embeddings excluding the target patches
+        context_block: torch.Tensor = (
+            self.get_context_block(  # NOTE: `context_block` contains positional information from `x`, which underwent the `self.forward_vit()` pass
+                x=x,
+                context_patches=context_patches,
+            )
+        )
+        batch_size, num_context_patches, embed_dim = context_block.shape
+
+        context_encoding: torch.Tensor = (
+            self.post_enc_norm_jepa(  # NOTE: `context_encoding` contains positional information from `x`, which underwent the `self.forward_vit()` pass
+                self.encoder(  # student encoder
+                    x=x,
+                )
+            )
         )  # (batch_size, num_context_patches, embed_dim)
-        b, n_c, e = context_block.shape
-
-        context_encoding: torch.Tensor = self.norm(
-            self.encoder(context_block)  # student encoder
-        )  # (batch_size, num_context_patches, embed_dim)
-        b, n_e, e = context_encoding.shape
-
+        batch_size, num_patches_enc, embed_dim = context_encoding.shape
         assert (
-            n_c == n_e
-        ), f"The number of context patches in the context_block ({n_c}) does not equal the number of context patches in the context_encoding ({n_e})."
+            num_context_patches == num_patches_enc
+        ), f"The number of patches in the context_block ({num_context_patches}) does not equal the number of patches in the context_encoding ({num_patches_enc})."
 
+        ### Make predictions using the decoder
         prediction_blocks = self.make_predictions(
-            num_target_blocks=m,
-            batch_dim=b,
-            num_patches=n_t,
-            embed_dim=e,
+            num_target_blocks=num_target_blocks,
+            batch_dim=batch_size,
+            num_patches=target_block_size,
+            embed_dim=embed_dim,
             target_patches=target_patches,
             context_encoding=context_encoding,
         )  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-        m, b, n_p, e = prediction_blocks.shape
-
+        num_target_blocks, batch_size, num_prediction_blocks, embed_dim = (
+            prediction_blocks.shape
+        )
         assert (
-            n_t == n_p
-        ), f"The number of context patches in the target_block ({n_t}) does not equal the number of context patches in the prediction_blocks ({n_p})."
+            target_block_size == num_prediction_blocks
+        ), f"The number of patches in the target_block ({target_block_size}) does not equal the number of patches in the prediction_blocks ({num_prediction_blocks})."
 
         return (
             prediction_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
             target_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
         )
+
+    @staticmethod
+    def generate_target_patches_2d(
+        patch_dim: Tuple[int, int],
+        aspect_ratio: Number,
+        scale: Number,
+        num_target_blocks: int,
+    ) -> Tuple[List[List[int]], List[int]]:
+        # TODO: Make this understand how to get target blocks with a temporal dimension if `self.is_video == True``
+        """
+        Generate target patches for each target block.
+
+        Args:
+            patch_dim (Tuple[int, int]): Dimensions of the patches (height, width).
+            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
+            scale (Number): Scaling factor for the number of patches in the target block.
+            num_target_blocks (int): Number of target blocks to generate.
+
+        Returns:
+            Tuple[List[List[int]], List[int]]:
+                - target_patches: A list of lists containing indices of patches for each target block.
+                - all_patches: A list of all unique patches used in target blocks.
+        """
+        # Extract patch dimensions
+        patch_h, patch_w = patch_dim
+
+        # Calculate the number of patches in the target block
+        num_patches_block: int = int(patch_h * patch_w * scale)
+
+        # Calculate the height and width of the target block maintaining the aspect ratio
+        """
+        aspect_ratio = w / h
+        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
+        h = sqrt(num_patches_block/aspect_ratio)
+        """
+        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
+        block_w: int = int(aspect_ratio * block_h)
+
+        # Initialize lists to hold target patches and all unique patches
+        target_patches: List[List[int]] = []
+        all_patches: List[int] = []
+
+        # For each of the target blocks to generate
+        for _ in range(
+            num_target_blocks  # num_target_blocks if not self.is_video else self.tubelet_size * num_target_blocks
+        ):
+            start_patch: int = JEPA_base.randomly_select_starting_patch_for_block(
+                patch_width=patch_w,
+                patch_height=patch_h,
+                block_width=block_w,
+                block_height=block_h,
+            )
+
+            # Initialize list to hold the patches for the target block
+            patches: List[int] = []
+            # Collect patches within the target block
+            for h in range(block_h):
+                for w in range(block_w):
+                    patches.append(start_patch + h * patch_w + w)
+                    if start_patch + h * patch_w + w not in all_patches:
+                        all_patches.append(start_patch + h * patch_w + w)
+
+            # Store the patches for the current target block
+            target_patches.append(patches)
+
+        return target_patches, all_patches
+
+    @staticmethod
+    def generate_target_patches_3d(
+        patch_dim: Tuple[int, int, int],
+        aspect_ratio: Number,
+        scale: Number,
+        num_target_blocks: int,
+    ) -> Tuple[List[List[int]], List[int]]:
+        # TODO: Make this understand how to get target blocks with a temporal dimension if `self.is_video == True``
+        """
+        Generate target patches for each target block in 3D space (spatio-temporal).
+
+        Args:
+            patch_dim (Tuple[int, int, int]): Dimensions of the patches (temporal, height, width).
+            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
+            scale (Number): Scaling factor for the number of patches in the target block.
+            num_target_blocks (int): Number of target blocks to generate.
+
+        Returns:
+            Tuple[List[List[int]], List[int]]:
+                - target_patches: A list of lists containing indices of patches for each target block.
+                - all_patches: A list of all unique patches used in target blocks.
+        """
+        # Extract patch dimensions
+        patch_t, patch_h, patch_w = patch_dim
+
+        # Calculate the number of patches in the target block
+        num_patches_block: int = int(patch_t * patch_h * patch_w * scale)
+
+        # Calculate the height and width of the target block maintaining the aspect ratio
+        """
+        aspect_ratio = w / h
+        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
+        h = sqrt(num_patches_block/aspect_ratio)
+        """
+        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
+        block_w: int = int(aspect_ratio * block_h)
+        block_t: int = patch_t
+
+        # Initialize lists to hold target patches and all unique patches
+        target_patches: List[List[int]] = []
+        all_patches: List[int] = []
+
+        # For each of the target blocks to generate
+        for _ in range(num_target_blocks):
+            start_patch: int = JEPA_base.randomly_select_starting_patch_for_block_3d(
+                patch_width=patch_w,
+                patch_height=patch_h,
+                block_width=block_w,
+                block_height=block_h,
+            )
+
+            # Initialize list to hold the patches for the target block
+            patches: List[int] = []
+            # Collect patches within the target block
+            for t in range(block_t):
+                for h in range(block_h):
+                    for w in range(block_w):
+                        patches.append(start_patch + h * patch_w + w)
+                        if start_patch + h * patch_w + w not in all_patches:
+                            all_patches.append(start_patch + h * patch_w + w)
+
+            # Store the patches for the current target block
+            target_patches.append(patches)
+
+        return target_patches, all_patches
+
+    @staticmethod
+    def generate_context_patches_2d(
+        patch_dim: Tuple[int, int],
+        aspect_ratio: Number,
+        scale: Number,
+        target_patches_to_exclude: List[int],
+    ) -> List[int]:
+        """
+        Generate a list of patch indices for the context block, excluding target patches.
+
+        Args:
+            patch_dim (Tuple[int, int]): Dimensions of the patches (height, width).
+            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
+            scale (Number): Scaling factor for the number of patches in the context block.
+            target_patches_to_exclude (List[int]): List containing indices of target patches.
+
+        Returns:
+            List[int]: A list of patch indices for the context block excluding target patches.
+        """
+        # Extract patch dimensions
+        patch_h, patch_w = patch_dim
+
+        # Calculate the number of patches in the context block
+        num_patches_block: int = int(patch_h * patch_w * scale)
+        # Calculate the height and width of the context block maintaining the aspect ratio
+        """
+        aspect_ratio = w / h
+        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
+        h = (num_patches_block/aspect_ratio)**.5
+        """
+        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
+        block_w: int = int(aspect_ratio * block_h)
+
+        # Randomly select the starting patch for the context block
+        start_patch: int = JEPA_base.randomly_select_starting_patch_for_block(
+            patch_width=patch_w,
+            patch_height=patch_h,
+            block_width=block_w,
+            block_height=block_h,
+        )
+
+        return [
+            start_patch + h * patch_w + w
+            for h in range(block_h)
+            for w in range(block_w)
+            if start_patch + h * patch_w + w not in target_patches_to_exclude
+        ]
 
     @staticmethod
     def randomly_select_starting_patch_for_block(
@@ -268,156 +502,3 @@ class JEPA_base(VisionTransformer):
         ) + start_x  # position in row
 
         return start_index
-
-    @staticmethod
-    def generate_target_patches(
-        patch_dim: Any,
-        aspect_ratio: Number,
-        scale: Number,
-        num_target_blocks: int,
-    ) -> Tuple[Any]:
-        """
-        Generate target patches for each target block.
-
-        Args:
-            patch_dim (Any): Dimensions of the patches.
-            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
-            scale (Number): Scaling factor for the number of patches in the target block.
-            num_target_blocks (int): Number of target blocks to generate.
-        """
-        raise NotImplementedError()
-
-    @staticmethod
-    def generate_context_patches(
-        patch_dim: Any,
-        aspect_ratio: Number,
-        scale: Number,
-        target_patches: List[Any],
-    ) -> Any:
-        """
-        Generate a list of patch indices for the context block, excluding target patches.
-
-        Args:
-            patch_dim (Any): Dimensions of the patches.
-            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
-            scale (Number): Scaling factor for the number of patches in the context block.
-            target_patches (List[Any]): List containing indices of target patches.
-        """
-        raise NotImplementedError()
-
-    @staticmethod
-    def generate_target_patches2D(
-        patch_dim: Tuple[int, int],
-        aspect_ratio: Number,
-        scale: Number,
-        num_target_blocks: int,
-    ) -> Tuple[List[List[int]], List[int]]:
-        """
-        Generate target patches for each target block.
-
-        Args:
-            patch_dim (Tuple[int, int]): Dimensions of the patches (height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
-            scale (Number): Scaling factor for the number of patches in the target block.
-            num_target_blocks (int): Number of target blocks to generate.
-
-        Returns:
-            Tuple[List[List[int]], List[int]]:
-                - target_patches: A list of lists containing indices of patches for each target block.
-                - all_patches: A list of all unique patches used in target blocks.
-        """
-        # Extract patch dimensions
-        patch_h, patch_w = patch_dim
-
-        # Calculate the number of patches in the target block
-        num_patches_block: int = int(patch_h * patch_w * scale)
-
-        # Calculate the height and width of the target block maintaining the aspect ratio
-        # pylint: disable=pointless-string-statement
-        """
-        aspect_ratio = w / h
-        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
-        h = sqrt(num_patches_block/aspect_ratio)
-        """
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
-
-        # Initialize lists to hold target patches and all unique patches
-        target_patches: List[List[int]] = []
-        all_patches: List[int] = []
-
-        # For each of the target blocks to generate
-        for _ in range(
-            num_target_blocks  # num_target_blocks if not self.is_video else self.tubelet_size * num_target_blocks
-            # TODO: Briadcast these target blocks along the temporal dimension in VJEPA
-        ):
-            start_patch: int = JEPA_base.randomly_select_starting_patch_for_block(
-                patch_width=patch_w,
-                patch_height=patch_h,
-                block_width=block_w,
-                block_height=block_h,
-            )
-
-            # Initialize list to hold the patches for the target block
-            patches: List[int] = []
-            # Collect patches within the target block
-            for i in range(block_h):
-                for j in range(block_w):
-                    patches.append(start_patch + i * patch_w + j)
-                    if start_patch + i * patch_w + j not in all_patches:
-                        all_patches.append(start_patch + i * patch_w + j)
-
-            # Store the patches for the current target block
-            target_patches.append(patches)
-
-        return target_patches, all_patches
-
-    @staticmethod
-    def generate_context_patches2D(
-        patch_dim: Tuple[int, int],
-        aspect_ratio: Number,
-        scale: Number,
-        target_patches: List[int],
-    ) -> List[int]:
-        """
-        Generate a list of patch indices for the context block, excluding target patches.
-
-        Args:
-            patch_dim (Tuple[int, int]): Dimensions of the patches (height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
-            scale (Number): Scaling factor for the number of patches in the context block.
-            target_patches (List[int]): List containing indices of target patches.
-
-        Returns:
-            List[int]: A list of patch indices for the context block excluding target patches.
-        """
-        # Extract patch dimensions
-        patch_h, patch_w = patch_dim
-
-        # Calculate the number of patches in the context block
-        num_patches_block: int = int(patch_h * patch_w * scale)
-        # pylint: disable=pointless-string-statement
-        """
-        aspect_ratio = w / h
-        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
-        h = (num_patches_block/aspect_ratio)**.5
-        """
-
-        # Calculate the height and width of the context block maintaining the aspect ratio
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
-
-        # Randomly select the starting patch for the context block
-        start_patch: int = JEPA_base.randomly_select_starting_patch_for_block(
-            patch_width=patch_w,
-            patch_height=patch_h,
-            block_width=block_w,
-            block_height=block_h,
-        )
-
-        return [
-            start_patch + i * patch_w + j
-            for i in range(block_h)
-            for j in range(block_w)
-            if start_patch + i * patch_w + j not in target_patches
-        ]

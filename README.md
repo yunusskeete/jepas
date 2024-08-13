@@ -6,6 +6,8 @@ Un-official PyTorch implementations of:
 - [ ] Graph-JEPA: [Graph-level Representation Learning with Joint-Embedding Predictive Architectures](https://arxiv.org/abs/2309.16014)
 
 ## I-JEPA Explained
+(JEPA is just an architectural and optimisational "slight of hand" for pretraining Vision Transformers that enables them to learn expressive features by predicting the latent space representations of uncorrupted portions of images given image inputs subject to occlusions.)
+
 I-JEPA exploits the following truth:
 The latent space representations is all you need for understanding.
 

@@ -82,6 +82,7 @@ class PatchEmbed3D(nn.Module):
     def __init__(
         self,
         img_size: int | Tuple[int, int] = 224,
+        num_frames: int = 16,
         patch_size: int | Tuple[int, int] = 16,
         tubelet_size: int = 2,  # Temporal dimension
         in_chans: int = 3,
@@ -93,7 +94,7 @@ class PatchEmbed3D(nn.Module):
         patch_size: Tuple[int, int] = ensure_tuple(patch_size)
 
         self.patch_shape: Tuple[int, int, int] = (
-            tubelet_size,
+            num_frames // tubelet_size,
             img_size[0] // patch_size[0],
             img_size[1] // patch_size[1],
         )
