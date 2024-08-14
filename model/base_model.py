@@ -482,19 +482,77 @@ class JEPA_base(VisionTransformer):
         patch_h, patch_w = patch_dim
         block_h, block_w = block_dim
 
-        max_y: int = patch_height - block_height + 1
-        max_x: int = patch_width - block_width + 1
+        max_h: int = patch_h - block_h + 1
+        max_w: int = patch_w - block_w + 1
 
-        start_y: int = random_int(max_y)
-        start_x: int = random_int(max_x)
+        start_h: int = random_int(max_h)
+        start_w: int = random_int(max_w)
 
         # Convert the 2D coordinate to a linear index
         # x1y1, x2y1, x3y1, ...
         # x1y2, x2y2, x3y3, ...
         # ... , ... , ... , ...
         # <--- patch_width --->
-        start_index = (
-            start_y * patch_width  # index of row `start_y` in flattened (1D) form
-        ) + start_x  # position in row
+        start_index: int = (
+            start_h * patch_w  # index of row `start_y` in flattened (1D) form
+        ) + start_w  # position in row
 
         return start_index
+        
+    @staticmethod
+    def randomly_select_starting_patch_for_block_3d(
+        patch_dim: Tuple[int, int, int],
+        block_dim: Tuple[int, int, int],
+        seed: Optional[int] = None,
+    ) -> int:
+        """
+        Randomly selects the patch defining the block's starting position (on a linear index).
+
+        Parameters:
+        patch_dim (Tuple[int, int, int]): A tuple containing the temporal dimension, width and height of the 3D patch.
+        block_dim (Tuple[int, int, int]): A tuple containing the temporal dimension, width and height of the 3D block from which the patch is to be extracted.
+        seed (Optional[int]): An optional random seed for reproducibility.
+
+        Returns:
+        int: The starting position of the patch within the block, represented as a linear index.
+
+        NOTE:
+        Patches are the basic (processing) units of the image (e.g. 16x16 pixels).
+        Blocks are larger regions composed of multiple patches.
+        In training, the model attempts to understand blocks within an image - ie. context blocks - by processing it one patch at a time,
+        and uses this understanding is used to predict the structure and content of (the target blocks within) an image in a more abstract way.
+
+        Linear index coordinates are used to define the starting patch for a block,
+        and map 2D pixel coordinates onto a 1D array index (flattened form).
+        """
+        if seed is not None:
+            torch.manual_seed(seed)  # Set the random seed for reproducibility
+
+        def random_int(limit: int) -> int:
+            return torch.randint(0, limit, (1,)).item()
+
+        patch_t, patch_h, patch_w = patch_dim
+        block_t, block_h, block_w = block_dim
+
+        max_t: int = patch_t - block_t + 1
+        max_h: int = patch_h - block_h + 1
+        max_w: int = patch_w - block_w + 1
+
+        start_t: int = random_int(max_t)
+        start_h: int = random_int(max_h)
+        start_w: int = random_int(max_w)
+
+        # Convert the 2D coordinate to a linear index
+        # x1y1, x2y1, x3y1, ...
+        # x1y2, x2y2, x3y3, ...
+        # ... , ... , ... , ...
+        # <--- patch_width --->
+        start_index: int = (
+            (
+                start_t * (patch_h * patch_w) # index through temporal dimension
+            ) + (
+            start_h * patch_w  # index of row `start_y` in flattened (1D) form
+        ) + start_w  # position in row
+
+        return start_index
+
