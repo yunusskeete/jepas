@@ -46,7 +46,6 @@ class JEPA_base(VisionTransformer):
         target_patches: List[List[int]],
     ) -> torch.Tensor:
         """
-        (Image/video invariant - just ensure that the `target_patches` are right)
         Generate target blocks from the input tensor using a target encoder.
 
         Args:
@@ -94,7 +93,6 @@ class JEPA_base(VisionTransformer):
         context_patches: List[int],
     ) -> torch.Tensor:
         """
-        (Image/video invariant - just ensure that the `context_patches` are right)
         Generate a context block from the input tensor, excluding target patches.
 
         Args:
@@ -173,7 +171,7 @@ class JEPA_base(VisionTransformer):
         Forward pass for generating predictions and targets within the JEPA architecture.
 
         Args:
-            x (torch.Tensor): Input tensor of shape: (batch_size, channels, img_height, img_width) if not self.is_video else (batch_size, time, channels, img_height, img_width).
+            x (torch.Tensor): Input tensor of shape: (batch_size, channels, img_height, img_width) if not self.is_video else (batch_size, channels, time, img_height, img_width).
             target_patches (List[List[int]]): A list of lists containing indices of patches for each target block.
             context_patches (List[int]): A list of patch indices for the context block excluding target patches.
 
@@ -186,15 +184,6 @@ class JEPA_base(VisionTransformer):
                         - prediction_blocks: Predicted blocks based on the context encoding.
                         - target_blocks: Actual target blocks.
         """
-        if self.is_video:
-            assert (
-                x.dim() == 5
-            ), f"Video tensor does not have the correct number of dimensions (5), received tensor of shape '{x.shape}'"
-
-            x: torch.Tensor = x.permute(
-                0, 2, 1, 3, 4
-            )  # (batch_size, channels, time, height, width)
-
         test_mode: bool = self.mode == "test"
         """
         Skip (student) encoder (`patch_embed_only=True`) during training
@@ -204,14 +193,14 @@ class JEPA_base(VisionTransformer):
         NOTE: Positional encoding applied to `x` during `self.forward_vit()`
         """
         x: torch.Tensor = self.forward_vit(x=x, patch_embed_only=not test_mode)
-        batch_size, num_patches, embed_dim = (
+        batch_size, num_patches, embed_dim = (  # pylint: disable=unused-variable
             x.shape
         )  # where num_patches = (output_height * output_width) if not self.is_video else (output_t * output_height * output_width)
 
         # If in test mode, return the full embedding using the student encoder
         if test_mode:
             return x  # (batch_size, num_patches, embed_dim)
-            
+
         # If not in test mode, generate target/context blocks, embed those using the student/teacher encoders,
         # and set up JEP (Joint Embedding Prediction) optimisation incentive
 
@@ -269,294 +258,30 @@ class JEPA_base(VisionTransformer):
         )
 
     @staticmethod
-    def generate_target_patches_2d(
-        patch_dim: Tuple[int, int],
+    def randomly_select_starting_patch_for_block(
+        patch_dim: Union[Tuple[int, int], Tuple[int, int, int]],
+        block_dim: Union[Tuple[int, int], Tuple[int, int, int]],
+        seed: Optional[int] = None,
+    ) -> int:
+        """Placeholder function"""
+        raise NotImplementedError()
+
+    @staticmethod
+    def generate_target_patches(
+        patch_dim: Union[Tuple[int, int], Tuple[int, int, int]],
         aspect_ratio: Number,
         scale: Number,
         num_target_blocks: int,
-    ) -> Tuple[List[List[int]], List[int]]:
-        """
-        Generate target patches for each target block.
-
-        Args:
-            patch_dim (Tuple[int, int]): Dimensions of the patches (height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
-            scale (Number): Scaling factor for the number of patches in the target block.
-            num_target_blocks (int): Number of target blocks to generate.
-
-        Returns:
-            Tuple[List[List[int]], List[int]]:
-                - target_patches: A list of lists containing indices of patches for each target block.
-                - all_patches: A list of all unique patches used in target blocks.
-        """
-        # Extract patch dimensions
-        patch_h, patch_w = patch_dim
-
-        # Calculate the number of patches in the target block
-        num_patches_block: int = int(patch_h * patch_w * scale)
-
-        # Calculate the height and width of the target block maintaining the aspect ratio
-        """
-        aspect_ratio = w / h
-        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
-        h = sqrt(num_patches_block/aspect_ratio)
-        """
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
-
-        block_dim: Tuple[int, int] = block_h, blochk_w
-
-        # Initialize lists to hold target patches and all unique patches
-        target_patches: List[List[int]] = []
-        all_patches: List[int] = []
-
-        # For each of the target blocks to generate
-        for _ in range(num_target_blocks):
-            start_patch: int = JEPA_base.randomly_select_starting_patch_for_block_2d(
-                patch_dim=patch_dim,
-                block_dim=block_dim,
-            )
-
-            # Initialize list to hold the patches for the target block
-            patches: List[int] = []
-            # Collect patches within the target block
-            for h in range(block_h):
-                for w in range(block_w):
-                    patch_start_position: int = start_patch + h * patch_w + w
-                    
-                    patches.append(patch_start_position)
-                    
-                    if patch_start_position not in all_patches:
-                        all_patches.append(patch_start_position)
-
-            # Store the patches for the current target block
-            target_patches.append(patches)
-
-        return target_patches, all_patches
+    ) -> int:
+        """Placeholder function"""
+        raise NotImplementedError()
 
     @staticmethod
-    def generate_target_patches_3d(
-        patch_dim: Tuple[int, int, int],
-        aspect_ratio: Number,
-        scale: Number,
-        num_target_blocks: int,
-    ) -> Tuple[List[List[int]], List[int]]:
-        """
-        Generate target patches for each target block in 3D space (spatio-temporal).
-
-        Args:
-            patch_dim (Tuple[int, int, int]): Dimensions of the patches (temporal, height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
-            scale (Number): Scaling factor for the number of patches in the target block.
-            num_target_blocks (int): Number of target blocks to generate.
-
-        Returns:
-            Tuple[List[List[int]], List[int]]:
-                - target_patches: A list of lists containing indices of patches for each target block.
-                - all_patches: A list of all unique patches used in target blocks.
-        """
-        # Extract patch dimensions
-        patch_t, patch_h, patch_w = patch_dim
-
-        # Calculate the number of patches in the target block
-        num_patches_block: int = int(patch_t * patch_h * patch_w * scale)
-
-        # Calculate the height and width of the target block maintaining the aspect ratio
-        """
-        aspect_ratio = w / h
-        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
-        h = sqrt(num_patches_block/aspect_ratio)
-        """
-        block_t: int = patch_t
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
-
-        block_dim: Tuple[int, int, int] = block_t, block_h, block_w
-
-        # Initialize lists to hold target patches and all unique patches
-        target_patches: List[List[int]] = []
-        all_patches: List[int] = []
-
-        # For each of the target blocks to generate
-        for _ in range(num_target_blocks):
-            start_patch: int = JEPA_base.randomly_select_starting_patch_for_block_3d(
-                patch_dim=patch_dim,
-                block_dim=block_dim,
-            )
-
-            # Initialize list to hold the patches for the target block
-            patches: List[int] = []
-            # Collect patches within the target block
-            for t in range(block_t):
-                for h in range(block_h):
-                    for w in range(block_w):
-                        patch_start_position: int = start_patch + ( t * (patch_h * patch_w) ) + (h * patch_w) + w
-                        
-                        patches.append(patch_start_position)
-                        
-                        if patch_start_position not in all_patches:
-                            all_patches.append(patch_start_position)
-
-            # Store the patches for the current target block
-            target_patches.append(patches)
-
-        return target_patches, all_patches
-
-    @staticmethod
-    def generate_context_patches_2d(
-        patch_dim: Tuple[int, int],
+    def generate_context_patches(
+        patch_dim: Union[Tuple[int, int], Tuple[int, int, int]],
         aspect_ratio: Number,
         scale: Number,
         target_patches_to_exclude: List[int],
     ) -> List[int]:
-        """
-        Generate a list of patch indices for the context block, excluding target patches.
-
-        Args:
-            patch_dim (Tuple[int, int]): Dimensions of the patches (height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
-            scale (Number): Scaling factor for the number of patches in the context block.
-            target_patches_to_exclude (List[int]): List containing indices of target patches.
-
-        Returns:
-            List[int]: A list of patch indices for the context block excluding target patches.
-        """
-        # Extract patch dimensions
-        patch_h, patch_w = patch_dim
-
-        # Calculate the number of patches in the context block
-        num_patches_block: int = int(patch_h * patch_w * scale)
-        # Calculate the height and width of the context block maintaining the aspect ratio
-        """
-        aspect_ratio = w / h
-        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
-        h = (num_patches_block/aspect_ratio)**.5
-        """
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
-
-        # Randomly select the starting patch for the context block
-        start_patch: int = JEPA_base.randomly_select_starting_patch_for_block(
-            patch_width=patch_w,
-            patch_height=patch_h,
-            block_width=block_w,
-            block_height=block_h,
-        )
-
-        return [
-            start_patch + h * patch_w + w
-            for h in range(block_h)
-            for w in range(block_w)
-            if start_patch + h * patch_w + w not in target_patches_to_exclude
-        ]
-
-    @staticmethod
-    def randomly_select_starting_patch_for_block_2d(
-        patch_dim: Tuple[int, int],
-        block_dim: Tuple[int, int],
-        seed: Optional[int] = None,
-    ) -> int:
-        """
-        Randomly selects the patch defining the block's starting position (on a linear index).
-
-        Parameters:
-        patch_dim (Tuple[int, int]): A tuple containing the width and height of the patch.
-        block_dim (Tuple[int, int]): A tuple containing the width and height of the block from which the patch is to be extracted.
-        seed (Optional[int]): An optional random seed for reproducibility.
-
-        Returns:
-        int: The starting position of the patch within the block, represented as a linear index.
-
-        NOTE:
-        Patches are the basic (processing) units of the image (e.g. 16x16 pixels).
-        Blocks are larger regions composed of multiple patches.
-        In training, the model attempts to understand blocks within an image - ie. context blocks - by processing it one patch at a time,
-        and uses this understanding is used to predict the structure and content of (the target blocks within) an image in a more abstract way.
-
-        Linear index coordinates are used to define the starting patch for a block,
-        and map 2D pixel coordinates onto a 1D array index (flattened form).
-        """
-        if seed is not None:
-            torch.manual_seed(seed)  # Set the random seed for reproducibility
-
-        def random_int(limit: int) -> int:
-            return torch.randint(0, limit, (1,)).item()
-
-        patch_h, patch_w = patch_dim
-        block_h, block_w = block_dim
-
-        max_h: int = patch_h - block_h + 1
-        max_w: int = patch_w - block_w + 1
-
-        start_h: int = random_int(max_h)
-        start_w: int = random_int(max_w)
-
-        # Convert the 2D coordinate to a linear index
-        # x1y1, x2y1, x3y1, ...
-        # x1y2, x2y2, x3y3, ...
-        # ... , ... , ... , ...
-        # <--- patch_width --->
-        start_index: int = (
-            start_h * patch_w  # index of row `start_y` in flattened (1D) form
-        ) + start_w  # position in row
-
-        return start_index
-        
-    @staticmethod
-    def randomly_select_starting_patch_for_block_3d(
-        patch_dim: Tuple[int, int, int],
-        block_dim: Tuple[int, int, int],
-        seed: Optional[int] = None,
-    ) -> int:
-        """
-        Randomly selects the patch defining the block's starting position (on a linear index).
-
-        Parameters:
-        patch_dim (Tuple[int, int, int]): A tuple containing the temporal dimension, width and height of the 3D patch.
-        block_dim (Tuple[int, int, int]): A tuple containing the temporal dimension, width and height of the 3D block from which the patch is to be extracted.
-        seed (Optional[int]): An optional random seed for reproducibility.
-
-        Returns:
-        int: The starting position of the patch within the block, represented as a linear index.
-
-        NOTE:
-        Patches are the basic (processing) units of the image (e.g. 16x16 pixels).
-        Blocks are larger regions composed of multiple patches.
-        In training, the model attempts to understand blocks within an image - ie. context blocks - by processing it one patch at a time,
-        and uses this understanding is used to predict the structure and content of (the target blocks within) an image in a more abstract way.
-
-        Linear index coordinates are used to define the starting patch for a block,
-        and map 2D pixel coordinates onto a 1D array index (flattened form).
-        """
-        if seed is not None:
-            torch.manual_seed(seed)  # Set the random seed for reproducibility
-
-        def random_int(limit: int) -> int:
-            return torch.randint(0, limit, (1,)).item()
-
-        patch_t, patch_h, patch_w = patch_dim
-        block_t, block_h, block_w = block_dim
-
-        max_t: int = patch_t - block_t + 1
-        max_h: int = patch_h - block_h + 1
-        max_w: int = patch_w - block_w + 1
-
-        start_t: int = random_int(max_t)
-        start_h: int = random_int(max_h)
-        start_w: int = random_int(max_w)
-
-        # Convert the 2D coordinate to a linear index
-        # x1y1, x2y1, x3y1, ...
-        # x1y2, x2y2, x3y3, ...
-        # ... , ... , ... , ...
-        # <--- patch_width --->
-        start_index: int = (
-            (
-                start_t * (patch_h * patch_w) # index through temporal dimension
-            ) + (
-                start_h * patch_w  # index down rows
-            ) + start_w  # index along columns
-        )
-
-        return start_index
-
+        """Placeholder function"""
+        raise NotImplementedError()
