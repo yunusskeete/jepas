@@ -304,17 +304,17 @@ class JEPA_base(VisionTransformer):
         block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
         block_w: int = int(aspect_ratio * block_h)
 
+        block_dim: Tuple[int, int] = block_h, blochk_w
+
         # Initialize lists to hold target patches and all unique patches
         target_patches: List[List[int]] = []
         all_patches: List[int] = []
 
         # For each of the target blocks to generate
         for _ in range(num_target_blocks):
-            start_patch: int = JEPA_base.randomly_select_starting_patch_for_block(
-                patch_width=patch_w,
-                patch_height=patch_h,
-                block_width=block_w,
-                block_height=block_h,
+            start_patch: int = JEPA_base.randomly_select_starting_patch_for_block_2d(
+                patch_dim=patch_dim,
+                block_dim=block_dim,
             )
 
             # Initialize list to hold the patches for the target block
@@ -367,9 +367,11 @@ class JEPA_base(VisionTransformer):
         num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
         h = sqrt(num_patches_block/aspect_ratio)
         """
+        block_t: int = patch_t
         block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
         block_w: int = int(aspect_ratio * block_h)
-        block_t: int = patch_t
+
+        block_dim: Tuple[int, int, int] = block_t, block_h, block_w
 
         # Initialize lists to hold target patches and all unique patches
         target_patches: List[List[int]] = []
@@ -378,10 +380,8 @@ class JEPA_base(VisionTransformer):
         # For each of the target blocks to generate
         for _ in range(num_target_blocks):
             start_patch: int = JEPA_base.randomly_select_starting_patch_for_block_3d(
-                patch_width=patch_w,
-                patch_height=patch_h,
-                block_width=block_w,
-                block_height=block_h,
+                patch_dim=patch_dim,
+                block_dim=block_dim,
             )
 
             # Initialize list to hold the patches for the target block
@@ -390,9 +390,12 @@ class JEPA_base(VisionTransformer):
             for t in range(block_t):
                 for h in range(block_h):
                     for w in range(block_w):
-                        patches.append(start_patch + h * patch_w + w)
-                        if start_patch + h * patch_w + w not in all_patches:
-                            all_patches.append(start_patch + h * patch_w + w)
+                        patch_start_position: int = start_patch + ( t * (patch_h * patch_w) ) + (h * patch_w) + w
+                        
+                        patches.append(patch_start_position)
+                        
+                        if patch_start_position not in all_patches:
+                            all_patches.append(patch_start_position)
 
             # Store the patches for the current target block
             target_patches.append(patches)
