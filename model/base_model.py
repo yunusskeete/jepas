@@ -551,8 +551,9 @@ class JEPA_base(VisionTransformer):
             (
                 start_t * (patch_h * patch_w) # index through temporal dimension
             ) + (
-            start_h * patch_w  # index of row `start_y` in flattened (1D) form
-        ) + start_w  # position in row
+                start_h * patch_w  # index down rows
+            ) + start_w  # index along columns
+        )
 
         return start_index
 
