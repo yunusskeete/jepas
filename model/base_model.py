@@ -21,12 +21,7 @@ class JEPA_base(VisionTransformer):
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
-        self.num_target_blocks = num_target_blocks  # Number of patches
-        # self.num_target_blocks = (
-        #     num_target_blocks
-        #     if not self.is_video
-        #     else self.tubelet_size * num_target_blocks
-        # )  # Number of patches
+        self.num_target_blocks = num_target_blocks
         self.mode = mode.lower()
 
         self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
@@ -216,6 +211,9 @@ class JEPA_base(VisionTransformer):
         # If in test mode, return the full embedding using the student encoder
         if test_mode:
             return x  # (batch_size, num_patches, embed_dim)
+            
+        # If not in test mode, generate target/context blocks, embed those using the student/teacher encoders,
+        # and set up JEP (Joint Embedding Prediction) optimisation incentive
 
         ### Get target embeddings using the target encoder
         target_blocks: torch.Tensor = (
@@ -239,7 +237,7 @@ class JEPA_base(VisionTransformer):
 
         context_encoding: torch.Tensor = (
             self.post_enc_norm_jepa(  # NOTE: `context_encoding` contains positional information from `x`, which underwent the `self.forward_vit()` pass
-                self.encoder(  # student encoder
+                self.encoder(  # student encoder (ViT)
                     x=x,
                 )
             )
@@ -277,7 +275,6 @@ class JEPA_base(VisionTransformer):
         scale: Number,
         num_target_blocks: int,
     ) -> Tuple[List[List[int]], List[int]]:
-        # TODO: Make this understand how to get target blocks with a temporal dimension if `self.is_video == True``
         """
         Generate target patches for each target block.
 
@@ -312,9 +309,7 @@ class JEPA_base(VisionTransformer):
         all_patches: List[int] = []
 
         # For each of the target blocks to generate
-        for _ in range(
-            num_target_blocks  # num_target_blocks if not self.is_video else self.tubelet_size * num_target_blocks
-        ):
+        for _ in range(num_target_blocks):
             start_patch: int = JEPA_base.randomly_select_starting_patch_for_block(
                 patch_width=patch_w,
                 patch_height=patch_h,
@@ -327,9 +322,12 @@ class JEPA_base(VisionTransformer):
             # Collect patches within the target block
             for h in range(block_h):
                 for w in range(block_w):
-                    patches.append(start_patch + h * patch_w + w)
-                    if start_patch + h * patch_w + w not in all_patches:
-                        all_patches.append(start_patch + h * patch_w + w)
+                    patch_start_position: int = start_patch + h * patch_w + w
+                    
+                    patches.append(patch_start_position)
+                    
+                    if patch_start_position not in all_patches:
+                        all_patches.append(patch_start_position)
 
             # Store the patches for the current target block
             target_patches.append(patches)
@@ -343,7 +341,6 @@ class JEPA_base(VisionTransformer):
         scale: Number,
         num_target_blocks: int,
     ) -> Tuple[List[List[int]], List[int]]:
-        # TODO: Make this understand how to get target blocks with a temporal dimension if `self.is_video == True``
         """
         Generate target patches for each target block in 3D space (spatio-temporal).
 
