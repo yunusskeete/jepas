@@ -448,21 +448,17 @@ class JEPA_base(VisionTransformer):
         ]
 
     @staticmethod
-    def randomly_select_starting_patch_for_block(
-        patch_width: int,
-        patch_height: int,
-        block_width: int,
-        block_height: int,
+    def randomly_select_starting_patch_for_block_2d(
+        patch_dim: Tuple[int, int],
+        block_dim: Tuple[int, int],
         seed: Optional[int] = None,
     ) -> int:
         """
         Randomly selects the patch defining the block's starting position (on a linear index).
 
         Parameters:
-        patch_width (int): The width of the patch.
-        patch_height (int): The height of the patch.
-        block_width (int): The width of the block from which the patch is to be extracted.
-        block_height (int): The height of the block from which the patch is to be extracted.
+        patch_dim (Tuple[int, int]): A tuple containing the width and height of the patch.
+        block_dim (Tuple[int, int]): A tuple containing the width and height of the block from which the patch is to be extracted.
         seed (Optional[int]): An optional random seed for reproducibility.
 
         Returns:
@@ -482,6 +478,9 @@ class JEPA_base(VisionTransformer):
 
         def random_int(limit: int) -> int:
             return torch.randint(0, limit, (1,)).item()
+
+        patch_h, patch_w = patch_dim
+        block_h, block_w = block_dim
 
         max_y: int = patch_height - block_height + 1
         max_x: int = patch_width - block_width + 1
