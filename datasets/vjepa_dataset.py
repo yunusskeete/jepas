@@ -41,6 +41,7 @@ class VideoDataset(Dataset):
         max_video_duration: Optional[float] = None,  # seconds
     ):
         super().__init__()
+
         self.frames_per_clip = frames_per_clip
         self.frame_step = frame_step
         self.num_clips = num_clips
@@ -74,14 +75,14 @@ class VideoDataset(Dataset):
     def __len__(self) -> int:
         return len(self.video_paths)
 
-    def __getitem__(self, index: int) -> torch.Tensor:
+    def __getitem__(self, index: int) -> Union[torch.Tensor, List[torch.Tensor]]:
 
         def split_into_clips(video: np.array) -> List[np.array]:
             """Split video into a list of clips"""
-            fpc = self.frames_per_clip
-            nc = self.num_clips
-
-            return [video[i * fpc : (i + 1) * fpc] for i in range(nc)]
+            return [
+                video[i * self.frames_per_clip : (i + 1) * self.frames_per_clip]
+                for i in range(self.num_clips)
+            ]
 
         video_path: Path = self.video_paths[index]
 
@@ -95,15 +96,20 @@ class VideoDataset(Dataset):
             # pylint: disable=invalid-sequence-index
             video_path: Path = self.video_paths[index]
 
-        # buffer: torch.Tensor = torch.from_numpy(buffer_np)
+        if self.num_clips > 1:
+            buffer_clips: List[np.array] = split_into_clips(buffer_np)
 
-        buffer: List[np.array] = split_into_clips(buffer_np)
+            if self.transform is not None:
+                buffer_clips: List[np.array] = [
+                    self.transform(clip) for clip in buffer_clips
+                ]
+
+            return buffer_clips
 
         if self.transform is not None:
-            # buffer: torch.Tensor = self.transform(buffer_np)
-            buffer: List[np.array] = [self.transform(clip) for clip in buffer]
+            buffer: torch.Tensor = self.transform(buffer_np)
 
-        return buffer
+            return buffer
 
     def load_video_decord(self, video_path: Path) -> Tuple[np.array, np.array]:
         if not os.path.exists(video_path):
@@ -144,8 +150,12 @@ class VideoDataModule(pl.LightningDataModule):
         self,
         dataset_path: Union[str, Path],
         batch_size: int = 16,
+        frames_per_clip: int = 16,
+        num_clips: int = 1,
         num_workers: int = 4,
         pin_memory: bool = True,
+        persistent_workers: bool = True,
+        prefetch_factor: Optional[int] = None,
         shuffle: bool = True,
         video_file_extensions: Union[str, List[str]] = [
             ".mp4",
@@ -163,8 +173,12 @@ class VideoDataModule(pl.LightningDataModule):
 
         self.dataset_path = dataset_path
         self.batch_size = batch_size
+        self.frames_per_clip = frames_per_clip
+        self.num_clips = num_clips
         self.num_workers = num_workers
         self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.prefetch_factor = prefetch_factor
         self.shuffle = shuffle
         self.video_file_extensions = video_file_extensions
 
@@ -177,16 +191,22 @@ class VideoDataModule(pl.LightningDataModule):
             dataset_path=self.dataset_path,
             stage="train",
             video_file_extensions=self.video_file_extensions,
+            frames_per_clip=self.frames_per_clip,
+            num_clips=self.num_clips,
         )
         self.val_dataset = VideoDataset(
             dataset_path=self.dataset_path,
             stage="val",
             video_file_extensions=self.video_file_extensions,
+            frames_per_clip=self.frames_per_clip,
+            num_clips=self.num_clips,
         )
         self.test_dataset = VideoDataset(
             dataset_path=self.dataset_path,
             stage="test",
             video_file_extensions=self.video_file_extensions,
+            frames_per_clip=self.frames_per_clip,
+            num_clips=self.num_clips,
         )
 
     def train_dataloader(self):
@@ -195,6 +215,8 @@ class VideoDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
+            prefetch_factor=self.prefetch_factor,
             shuffle=self.shuffle,
         )
 
@@ -204,6 +226,8 @@ class VideoDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
+            prefetch_factor=self.prefetch_factor,
             shuffle=False,
         )
 
@@ -213,6 +237,8 @@ class VideoDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
+            prefetch_factor=self.prefetch_factor,
             shuffle=False,
         )
 
@@ -228,9 +254,7 @@ if __name__ == "__main__":
 
     # Example of iterating through the test data
     for video_clips in test_vjepa_loader:
-        print(
-            f"{len(video_clips)=}"
-        )  # Should print torch.Size([batch_size, num_channels=3, clip_length, img_height, img_width])
+        print(f"{len(video_clips)=}")  # Should print 1
         print(
             f"{video_clips[0].shape=}"
         )  # Should print torch.Size([batch_size, num_channels=3, clip_length, img_height, img_width])
@@ -245,9 +269,7 @@ if __name__ == "__main__":
 
     # Example of iterating through the test data
     for video_clips in test_dataloader:
-        print(
-            f"{len(video_clips)=}"
-        )  # Should print torch.Size([batch_size, num_channels=3, clip_length, img_height, img_width])
+        print(f"{len(video_clips)=}")  # Should print 1
         print(
             f"{video_clips[0].shape=}"
         )  # Should print torch.Size([batch_size, num_channels=3, clip_length, img_height, img_width])

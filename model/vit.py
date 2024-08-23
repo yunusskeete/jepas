@@ -30,8 +30,8 @@ class VisionTransformer(nn.Module):
         self.patch_size = ensure_tuple(patch_size)
 
         self.num_frames = num_frames
-        self.tubelet_size = tubelet_size
         self.is_video = num_frames > 1
+        self.tubelet_size = tubelet_size
 
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -109,7 +109,7 @@ class VisionTransformer(nn.Module):
         x = self.post_emb_norm_vit(x)  # (batch, num_patches, embed_dim)
 
         if patch_embed_only:
-            return x
+            return x  # (batch, num_patches, embed_dim)
 
         # Encode the patch embeddings using the student encoder
         x = self.encoder(x, attn_mask=attention_mask)  # (batch, num_patches, embed_dim)

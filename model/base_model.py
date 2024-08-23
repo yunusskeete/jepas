@@ -227,7 +227,7 @@ class JEPA_base(VisionTransformer):
         context_encoding: torch.Tensor = (
             self.post_enc_norm_jepa(  # NOTE: `context_encoding` contains positional information from `x`, which underwent the `self.forward_vit()` pass
                 self.encoder(  # student encoder (ViT)
-                    x=x,
+                    x=context_block,
                 )
             )
         )  # (batch_size, num_context_patches, embed_dim)

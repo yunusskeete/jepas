@@ -59,8 +59,8 @@ class IJEPA(JEPA_base, pl.LightningModule):
         Randomly selects the patch defining the block's starting position (on a linear index).
 
         Parameters:
-        patch_dim (Tuple[int, int]): A tuple containing the width and height of the patch.
-        block_dim (Tuple[int, int]): A tuple containing the width and height of the block from which the patch is to be extracted.
+        patch_dim (Tuple[int, int]): A tuple containing the number of patches in each dimension (width and height).
+        block_dim (Tuple[int, int]): A tuple containing the number of patches in each dimension (width and height) of the block from which the patch is to be extracted.
         seed (Optional[int]): An optional random seed for reproducibility.
 
         Returns:
@@ -81,14 +81,24 @@ class IJEPA(JEPA_base, pl.LightningModule):
         def random_int(limit: int) -> int:
             return torch.randint(0, limit, (1,)).item()
 
-        patch_h, patch_w = patch_dim
-        block_h, block_w = block_dim
+        num_patches_h, num_patches_w = (
+            patch_dim  # The number of patches in each dimension (width and height)
+        )
+        num_blocks_h, num_blocks_w = (
+            block_dim  # The number of patches in each dimension (width and height)
+        )
 
-        max_h: int = patch_h - block_h + 1
-        max_w: int = patch_w - block_w + 1
+        max_start_index_h: int = num_patches_h - num_blocks_h + 1
+        max_start_index_w: int = num_patches_w - num_blocks_w + 1
+        assert all(
+            (
+                num_blocks_h <= num_patches_h,
+                num_blocks_w <= num_patches_w,
+            )
+        ), f"Blocks cannot be smaller than patches along any dimension, but there were more blocks than patches along at least one dimension ({patch_dim=}, {block_dim=})"
 
-        start_h: int = random_int(max_h)
-        start_w: int = random_int(max_w)
+        start_index_h: int = random_int(max_start_index_h)
+        start_index_w: int = random_int(max_start_index_w)
 
         # Convert the 2D coordinate to a linear index
         # x1y1, x2y1, x3y1, ...
@@ -96,8 +106,9 @@ class IJEPA(JEPA_base, pl.LightningModule):
         # ... , ... , ... , ...
         # <--- patch_width --->
         start_index: int = (
-            start_h * patch_w  # index of row `start_y` in flattened (1D) form
-        ) + start_w  # position in row
+            start_index_h
+            * num_patches_w  # index of row `start_y` in flattened (1D) form
+        ) + start_index_w  # position in row
 
         return start_index
 
@@ -112,7 +123,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         Generate (spatial) target patches for each 2D target block.
 
         Args:
-            patch_dim (Tuple[int, int]): Dimensions of the patches (height, width).
+            patch_dim (Tuple[int, int]): The number of patches in each dimension (height, width).
             aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
             scale (Number): Scaling factor for the number of patches in the target block.
             num_target_blocks (int): Number of target blocks to generate.
@@ -122,11 +133,11 @@ class IJEPA(JEPA_base, pl.LightningModule):
                 - target_patches: A list of lists containing indices of patches for each target block.
                 - all_patches: A list of all unique patches used in target blocks.
         """
-        # Extract patch dimensions
-        patch_h, patch_w = patch_dim
+        # Extract the number of patches in each dimension
+        num_patches_h, num_patches_w = patch_dim
 
         # Calculate the number of patches in the target block
-        num_patches_block: int = int(patch_h * patch_w * scale)
+        num_patches_block: int = int(num_patches_h * num_patches_w * scale)
 
         # Calculate the height and width of the target block maintaining the aspect ratio
         """
@@ -134,10 +145,12 @@ class IJEPA(JEPA_base, pl.LightningModule):
         num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
         h = sqrt(num_patches_block/aspect_ratio)
         """
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
+        num_blocks_h: int = int(
+            torch.sqrt(torch.tensor(num_patches_block / aspect_ratio))
+        )
+        num_blocks_w: int = int(aspect_ratio * num_blocks_h)
 
-        block_dim: Tuple[int, int] = block_h, block_w
+        block_dim: Tuple[int, int] = num_blocks_h, num_blocks_w
 
         # Initialize lists to hold target patches and all unique patches
         target_patches: List[List[int]] = []
@@ -153,9 +166,9 @@ class IJEPA(JEPA_base, pl.LightningModule):
             # Initialize list to hold the patches for the target block
             patches: List[int] = []
             # Collect patches within the target block
-            for h in range(block_h):
-                for w in range(block_w):
-                    patch_start_position: int = start_patch + h * patch_w + w
+            for h in range(num_blocks_h):
+                for w in range(num_blocks_w):
+                    patch_start_position: int = start_patch + h * num_patches_w + w
 
                     patches.append(patch_start_position)
 
@@ -178,7 +191,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         Generate a list of patch indices for the 2D context block, excluding target patches.
 
         Args:
-            patch_dim (Tuple[int, int]): Dimensions of the patches (height, width).
+            patch_dim (Tuple[int, int]): The number of patches in each dimension (height, width).
             aspect_ratio (Number): Aspect ratio to be maintained for the context block.
             scale (Number): Scaling factor for the number of patches in the context block.
             target_patches_to_exclude (List[int]): List containing indices of target patches.
@@ -186,21 +199,24 @@ class IJEPA(JEPA_base, pl.LightningModule):
         Returns:
             List[int]: A list of patch indices for the context block excluding target patches.
         """
-        # Extract patch dimensions
-        patch_h, patch_w = patch_dim
+        # Extract the number of patches in each dimension
+        num_patches_h, num_patches_w = patch_dim
 
         # Calculate the number of patches in the context block
-        num_patches_block: int = int(patch_h * patch_w * scale)
+        num_patches_block: int = int(num_patches_h * num_patches_w * scale)
+
         # Calculate the height and width of the context block maintaining the aspect ratio
         """
         aspect_ratio = w / h
         num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
         h = (num_patches_block/aspect_ratio)**.5
         """
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
+        num_blocks_h: int = int(
+            torch.sqrt(torch.tensor(num_patches_block / aspect_ratio))
+        )
+        num_blocks_w: int = int(aspect_ratio * num_blocks_h)
 
-        block_dim: Tuple[int, int] = block_h, block_w
+        block_dim: Tuple[int, int] = num_blocks_h, num_blocks_w
 
         # Randomly select the starting patch for the context block
         start_patch: int = IJEPA.randomly_select_starting_patch_for_block(
@@ -209,11 +225,11 @@ class IJEPA(JEPA_base, pl.LightningModule):
         )
 
         # context_patches: List[int] = []
-        # for h in range(block_h):
-        #     for w in range(block_w):
+        # for h in range(num_blocks_h):
+        #     for w in range(num_blocks_w):
         #         patch_index: int = (
         #             start_patch
-        #             + h * patch_w  # height dimension offset
+        #             + h * num_patches_w  # height dimension offset
         #             + w  # width dimension offset
         #         )
         #         if patch_index not in target_patches_to_exclude:
@@ -223,11 +239,11 @@ class IJEPA(JEPA_base, pl.LightningModule):
         h_indices: np.array
         w_indices: np.array
         h_indices, w_indices = np.meshgrid(
-            np.arange(block_h), np.arange(block_w), indexing="ij"
+            np.arange(num_blocks_h), np.arange(num_blocks_w), indexing="ij"
         )
 
         linear_indices: np.array = start_patch + (
-            h_indices.flatten() * patch_w + w_indices.flatten()
+            h_indices.flatten() * num_patches_w + w_indices.flatten()
         )
 
         # Exclude target patches
@@ -257,7 +273,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         target_patches: List[List[int]]
         all_unique_target_patches: List[int]
         target_patches, all_unique_target_patches = IJEPA.generate_target_patches(
-            patch_dim=self.patch_embed.patch_shape,
+            patch_dim=self.patch_embed.patch_shape,  # The number of patches in each dimension
             aspect_ratio=target_aspect_ratio,
             scale=target_scale,
             num_target_blocks=self.num_target_blocks,
@@ -486,6 +502,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         num_target_blocks: int = 4,  # number of distinct target blocks per image
         m: float = 0.996,  # momentum
         momentum_limits: Tuple[float, float] = (0.996, 1.0),
+        num_frames: int = 16,
         **kwargs,
     ):
         pl.LightningModule.__init__(self)
@@ -493,6 +510,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
             self,
             decoder_depth=decoder_depth,
             num_target_blocks=num_target_blocks,
+            num_frames=num_frames,
             **kwargs,
         )
         self.save_hyperparameters()
@@ -542,16 +560,23 @@ class VJEPA(JEPA_base, pl.LightningModule):
         def random_int(limit: int) -> int:
             return torch.randint(0, limit, (1,)).item()
 
-        patch_t, patch_h, patch_w = patch_dim
-        block_t, block_h, block_w = block_dim
+        num_patches_t, num_patches_h, num_patches_w = patch_dim
+        num_blocks_t, num_blocks_h, num_blocks_w = block_dim
+        assert all(
+            (
+                num_blocks_t <= num_patches_t,
+                num_blocks_h <= num_patches_h,
+                num_blocks_w <= num_patches_w,
+            )
+        ), f"Blocks cannot be smaller than patches along any dimension, but there were more blocks than patches along at least one dimension ({patch_dim=}, {block_dim=})"
 
-        max_t: int = patch_t - block_t + 1
-        max_h: int = patch_h - block_h + 1
-        max_w: int = patch_w - block_w + 1
+        max_start_index_t: int = num_patches_t - num_blocks_t + 1
+        max_start_index_h: int = num_patches_h - num_blocks_h + 1
+        max_start_index_w: int = num_patches_w - num_blocks_w + 1
 
-        start_t: int = random_int(max_t)
-        start_h: int = random_int(max_h)
-        start_w: int = random_int(max_w)
+        start_index_t: int = random_int(max_start_index_t)
+        start_index_h: int = random_int(max_start_index_h)
+        start_index_w: int = random_int(max_start_index_w)
 
         # Convert the 2D coordinate to a linear index
         # x1y1, x2y1, x3y1, ...
@@ -559,9 +584,11 @@ class VJEPA(JEPA_base, pl.LightningModule):
         # ... , ... , ... , ...
         # <--- patch_width --->
         start_index: int = (
-            (start_t * (patch_h * patch_w))  # index through temporal dimension
-            + (start_h * patch_w)  # index down rows
-            + start_w  # index along columns
+            (
+                start_index_t * (num_patches_h * num_patches_w)
+            )  # index through temporal dimension
+            + (start_index_h * num_patches_w)  # index down rows
+            + start_index_w  # index along columns
         )
 
         return start_index
@@ -577,7 +604,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         Generate (spatio-temporal) target patches for each 3D target block.
 
         Args:
-            patch_dim (Tuple[int, int, int]): Dimensions of the patches (temporal, height, width).
+            patch_dim (Tuple[int, int, int]): The number of patches in each dimension (temporal, height, width).
             aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
             scale (Number): Scaling factor for the number of patches in the target block.
             num_target_blocks (int): Number of target blocks to generate.
@@ -587,23 +614,27 @@ class VJEPA(JEPA_base, pl.LightningModule):
                 - target_patches: A list of lists containing indices of patches for each target block.
                 - all_patches: A list of all unique patches used in target blocks.
         """
-        # Extract patch dimensions
-        patch_t, patch_h, patch_w = patch_dim
+        # Extract the number of patches in each dimension
+        num_patches_t, num_patches_h, num_patches_w = patch_dim
 
         # Calculate the number of patches in the target block
-        num_patches_block: int = int(patch_t * patch_h * patch_w * scale)
+        num_patches_block: int = int(
+            num_patches_t * num_patches_h * num_patches_w * scale
+        )
 
         # Calculate the height and width of the target block maintaining the aspect ratio
         """
         aspect_ratio = w / h
-        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
-        h = sqrt(num_patches_block/aspect_ratio)
+        num_patches_block = t * h * (w) = t * h * (aspect_ratio * h) = aspect_ratio * t * h**2
+        h = sqrt(num_patches_block/(aspect_ratio * t))
         """
-        block_t: int = patch_t
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
+        num_blocks_t: int = num_patches_t
+        num_blocks_h: int = int(
+            torch.sqrt(torch.tensor(num_patches_block / (aspect_ratio * num_blocks_t)))
+        )
+        num_blocks_w: int = int(aspect_ratio * num_blocks_h)
 
-        block_dim: Tuple[int, int, int] = block_t, block_h, block_w
+        block_dim: Tuple[int, int, int] = num_blocks_t, num_blocks_h, num_blocks_w
 
         # Initialize lists to hold target patches and all unique patches
         target_patches: List[List[int]] = []
@@ -619,11 +650,14 @@ class VJEPA(JEPA_base, pl.LightningModule):
             # Initialize list to hold the patches for the target block
             patches: List[int] = []
             # Collect patches within the target block
-            for t in range(block_t):
-                for h in range(block_h):
-                    for w in range(block_w):
+            for t in range(num_blocks_t):
+                for h in range(num_blocks_h):
+                    for w in range(num_blocks_w):
                         patch_start_position: int = (
-                            start_patch + (t * (patch_h * patch_w)) + (h * patch_w) + w
+                            start_patch
+                            + (t * (num_patches_h * num_patches_w))
+                            + (h * num_patches_w)
+                            + w
                         )
 
                         patches.append(patch_start_position)
@@ -655,23 +689,27 @@ class VJEPA(JEPA_base, pl.LightningModule):
         Returns:
             List[int]: A list of patch indices for the context block excluding target patches.
         """
-        # Extract patch dimensions
-        patch_t, patch_h, patch_w = patch_dim
+        # Extract the number of patches in each dimension
+        num_patches_t, num_patches_h, num_patches_w = patch_dim
 
         # Calculate the number of patches in the context block
-        num_patches_block: int = int(patch_t, patch_h * patch_w * scale)
+        num_patches_block: int = int(
+            num_patches_t * num_patches_h * num_patches_w * scale
+        )
 
         # Calculate the height and width of the context block maintaining the aspect ratio
         """
         aspect_ratio = w / h
-        num_patches_block = h * (w) = h * (aspect_ratio * h) = aspect_ratio * h**2
-        h = (num_patches_block/aspect_ratio)**.5
+        num_patches_block = t * h * (w) = t * h * (aspect_ratio * h) = aspect_ratio * t * h**2
+        h = (num_patches_block/aspect_ratio * t)**.5
         """
-        block_t: int = patch_t
-        block_h: int = int(torch.sqrt(torch.tensor(num_patches_block / aspect_ratio)))
-        block_w: int = int(aspect_ratio * block_h)
+        num_blocks_t: int = num_patches_t
+        num_blocks_h: int = int(
+            torch.sqrt(torch.tensor(num_patches_block / (aspect_ratio * num_patches_t)))
+        )
+        num_blocks_w: int = int(aspect_ratio * num_blocks_h)
 
-        block_dim: Tuple[int, int] = block_t, block_h, block_w
+        block_dim: Tuple[int, int] = num_blocks_t, num_blocks_h, num_blocks_w
 
         # Randomly select the starting patch for the context block
         start_patch: int = VJEPA.randomly_select_starting_patch_for_block(
@@ -679,40 +717,45 @@ class VJEPA(JEPA_base, pl.LightningModule):
             block_dim=block_dim,
         )
 
-        # context_patches: List[int] = []
-        # for t in range(block_t):
-        #     for h in range(block_h):
-        #         for w in range(block_w):
-        #             patch_index: int = (
+        # _context_patches: List[int] = []
+        # for t in range(num_blocks_t):
+        #     for h in range(num_blocks_h):
+        #         for w in range(num_blocks_w):
+        #             _patch_index: int = (
         #                 start_patch
-        #                 + t * (patch_h * patch_w)  # temporal dimension offset
-        #                 + h * patch_w  # height dimension offset
+        #                 + t
+        #                 * (num_patches_h * num_patches_w)  # temporal dimension offset
+        #                 + h * num_patches_w  # height dimension offset
         #                 + w  # width dimension offset
         #             )
 
-        #             if patch_index not in target_patches_to_exclude:
-        #                 context_patches.append(patch_index)
+        #             if _patch_index not in target_patches_to_exclude:
+        #                 _context_patches.append(_patch_index)
 
         # Generate indices for the context block
         t_indices: np.array
         h_indices: np.array
         w_indices: np.array
         t_indices, h_indices, w_indices = np.meshgrid(
-            np.arange(block_t), np.arange(block_h), np.arange(block_w), indexing="ij"
+            np.arange(num_blocks_t),
+            np.arange(num_blocks_h),
+            np.arange(num_blocks_w),
+            indexing="ij",
         )
 
         linear_indices: np.array = start_patch + (
-            t_indices.flatten() * (patch_h * patch_w)
-            + h_indices.flatten() * patch_w
+            t_indices.flatten() * (num_patches_h * num_patches_w)
+            + h_indices.flatten() * num_patches_w
             + w_indices.flatten()
         )
 
         # Exclude target patches
-        # context_patches: List[int] = [
+        # _context_patches: List[int] = [
         #     int(index)
         #     for index in linear_indices
         #     if int(index) not in target_patches_to_exclude
         # ]
+
         # Convert target_patches_to_exclude to a set for faster lookups
         target_patches_set = set(target_patches_to_exclude)
 
@@ -720,6 +763,8 @@ class VJEPA(JEPA_base, pl.LightningModule):
         context_patches: List[int] = np.setdiff1d(
             linear_indices, np.array(list(target_patches_set)), assume_unique=True
         ).tolist()
+
+        # assert _context_patches == context_patches
 
         return context_patches
 
@@ -747,11 +792,11 @@ class VJEPA(JEPA_base, pl.LightningModule):
             target_patches_to_exclude=all_unique_target_patches,
         )
 
-        x: torch.Tensor = (
-            x.permute(  # (batch_size, time, channels, img_height, img_width)
-                0, 2, 1, 3, 4
-            )
-        )  # (batch_size, channels, time, height, width)
+        # x: torch.Tensor = (
+        #     x.permute(  # (batch_size, time, channels, img_height, img_width)
+        #         0, 2, 1, 3, 4
+        #     )
+        # )  # (batch_size, channels, time, height, width)
 
         return self.forward_base(
             x=x,
