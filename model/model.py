@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -118,7 +118,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         aspect_ratio: Number,
         scale: Number,
         num_target_blocks: int,
-    ) -> Tuple[List[List[int]], List[int]]:
+    ) -> Tuple[List[List[int]], Set[int]]:
         """
         Generate (spatial) target patches for each 2D target block.
 
@@ -129,9 +129,9 @@ class IJEPA(JEPA_base, pl.LightningModule):
             num_target_blocks (int): Number of target blocks to generate.
 
         Returns:
-            Tuple[List[List[int]], List[int]]:
+            Tuple[List[List[int]], Set[int]]:
                 - target_patches: A list of lists containing indices of patches for each target block.
-                - all_patches: A list of all unique patches used in target blocks.
+                - all_patches: A set of all unique patches used in target blocks.
         """
         # Extract the number of patches in each dimension
         num_patches_h, num_patches_w = patch_dim
@@ -152,9 +152,9 @@ class IJEPA(JEPA_base, pl.LightningModule):
 
         block_dim: Tuple[int, int] = num_blocks_h, num_blocks_w
 
-        # Initialize lists to hold target patches and all unique patches
+        # Initialize structures to hold target patches and all unique patches
         target_patches: List[List[int]] = []
-        all_patches: List[int] = []
+        all_patches: Set[int] = set()  # Using a set for fast membership checks
 
         # For each of the target blocks to generate
         for _ in range(num_target_blocks):
@@ -172,8 +172,8 @@ class IJEPA(JEPA_base, pl.LightningModule):
 
                     patches.append(patch_start_position)
 
-                    if patch_start_position not in all_patches:
-                        all_patches.append(patch_start_position)
+                    # Only updated if the start position is not already present
+                    all_patches.add(patch_start_position)
 
             # Store the patches for the current target block
             target_patches.append(patches)
@@ -185,7 +185,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         patch_dim: Tuple[int, int],
         aspect_ratio: Number,
         scale: Number,
-        target_patches_to_exclude: List[int],
+        target_patches_to_exclude: Set[int],
     ) -> List[int]:
         """
         Generate a list of patch indices for the 2D context block, excluding target patches.
@@ -194,7 +194,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
             patch_dim (Tuple[int, int]): The number of patches in each dimension (height, width).
             aspect_ratio (Number): Aspect ratio to be maintained for the context block.
             scale (Number): Scaling factor for the number of patches in the context block.
-            target_patches_to_exclude (List[int]): List containing indices of target patches.
+            target_patches_to_exclude (Set[int]): Set containing indices of target patches.
 
         Returns:
             List[int]: A list of patch indices for the context block excluding target patches.
@@ -224,17 +224,6 @@ class IJEPA(JEPA_base, pl.LightningModule):
             block_dim=block_dim,
         )
 
-        # context_patches: List[int] = []
-        # for h in range(num_blocks_h):
-        #     for w in range(num_blocks_w):
-        #         patch_index: int = (
-        #             start_patch
-        #             + h * num_patches_w  # height dimension offset
-        #             + w  # width dimension offset
-        #         )
-        #         if patch_index not in target_patches_to_exclude:
-        #             context_patches.append(patch_index)
-
         # Generate indices for the context block
         h_indices: np.array
         w_indices: np.array
@@ -247,17 +236,8 @@ class IJEPA(JEPA_base, pl.LightningModule):
         )
 
         # Exclude target patches
-        # context_patches: List[int] = [
-        #     int(index)
-        #     for index in linear_indices
-        #     if int(index) not in target_patches_to_exclude
-        # ]
-        # Convert target_patches_to_exclude to a set for faster lookups
-        target_patches_set = set(target_patches_to_exclude)
-
-        # Use numpy to filter out the excluded patches efficiently
         context_patches: List[int] = np.setdiff1d(
-            linear_indices, np.array(list(target_patches_set)), assume_unique=True
+            linear_indices, np.array(target_patches_to_exclude), assume_unique=True
         ).tolist()
 
         return context_patches
@@ -271,7 +251,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         context_scale: float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         target_patches: List[List[int]]
-        all_unique_target_patches: List[int]
+        all_unique_target_patches: Set[int]
         target_patches, all_unique_target_patches = IJEPA.generate_target_patches(
             patch_dim=self.patch_embed.patch_shape,  # The number of patches in each dimension
             aspect_ratio=target_aspect_ratio,
@@ -599,7 +579,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         aspect_ratio: Number,
         scale: Number,
         num_target_blocks: int,
-    ) -> Tuple[List[List[int]], List[int]]:
+    ) -> Tuple[List[List[int]], Set[int]]:
         """
         Generate (spatio-temporal) target patches for each 3D target block.
 
@@ -610,9 +590,9 @@ class VJEPA(JEPA_base, pl.LightningModule):
             num_target_blocks (int): Number of target blocks to generate.
 
         Returns:
-            Tuple[List[List[int]], List[int]]:
+            Tuple[List[List[int]], Set[int]]:
                 - target_patches: A list of lists containing indices of patches for each target block.
-                - all_patches: A list of all unique patches used in target blocks.
+                - all_patches: A set of all unique patches used in target blocks.
         """
         # Extract the number of patches in each dimension
         num_patches_t, num_patches_h, num_patches_w = patch_dim
@@ -636,9 +616,9 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
         block_dim: Tuple[int, int, int] = num_blocks_t, num_blocks_h, num_blocks_w
 
-        # Initialize lists to hold target patches and all unique patches
+        # Initialize structures to hold target patches and all unique patches
         target_patches: List[List[int]] = []
-        all_patches: List[int] = []
+        all_patches: Set[int] = set()  # Using a set for fast membership checks
 
         # For each of the target blocks to generate
         for _ in range(num_target_blocks):
@@ -662,8 +642,8 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
                         patches.append(patch_start_position)
 
-                        if patch_start_position not in all_patches:
-                            all_patches.append(patch_start_position)
+                        # Only updated if the start position is not already present
+                        all_patches.add(patch_start_position)
 
             # Store the patches for the current target block
             target_patches.append(patches)
@@ -675,7 +655,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         patch_dim: Tuple[int, int, int],
         aspect_ratio: Number,
         scale: Number,
-        target_patches_to_exclude: List[int],
+        target_patches_to_exclude: Set[int],
     ) -> List[int]:
         """
         Generate a list of patch indices for the 3D context block, excluding target patches.
@@ -684,7 +664,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
             patch_dim (Tuple[int, int, int]): Dimensions of the patches (temporal, height, width).
             aspect_ratio (Number): Aspect ratio to be maintained for the context block.
             scale (Number): Scaling factor for the number of patches in the context block.
-            target_patches_to_exclude (List[int]): List containing indices of target patches.
+            target_patches_to_exclude (Set[int]): Set containing indices of target patches.
 
         Returns:
             List[int]: A list of patch indices for the context block excluding target patches.
@@ -717,21 +697,6 @@ class VJEPA(JEPA_base, pl.LightningModule):
             block_dim=block_dim,
         )
 
-        # _context_patches: List[int] = []
-        # for t in range(num_blocks_t):
-        #     for h in range(num_blocks_h):
-        #         for w in range(num_blocks_w):
-        #             _patch_index: int = (
-        #                 start_patch
-        #                 + t
-        #                 * (num_patches_h * num_patches_w)  # temporal dimension offset
-        #                 + h * num_patches_w  # height dimension offset
-        #                 + w  # width dimension offset
-        #             )
-
-        #             if _patch_index not in target_patches_to_exclude:
-        #                 _context_patches.append(_patch_index)
-
         # Generate indices for the context block
         t_indices: np.array
         h_indices: np.array
@@ -750,21 +715,9 @@ class VJEPA(JEPA_base, pl.LightningModule):
         )
 
         # Exclude target patches
-        # _context_patches: List[int] = [
-        #     int(index)
-        #     for index in linear_indices
-        #     if int(index) not in target_patches_to_exclude
-        # ]
-
-        # Convert target_patches_to_exclude to a set for faster lookups
-        target_patches_set = set(target_patches_to_exclude)
-
-        # Use numpy to filter out the excluded patches efficiently
         context_patches: List[int] = np.setdiff1d(
-            linear_indices, np.array(list(target_patches_set)), assume_unique=True
+            linear_indices, np.array(target_patches_to_exclude), assume_unique=True
         ).tolist()
-
-        # assert _context_patches == context_patches
 
         return context_patches
 
@@ -777,7 +730,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         context_scale: float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         target_patches: List[List[int]]
-        all_unique_target_patches: List[int]
+        all_unique_target_patches: Set[int]
         target_patches, all_unique_target_patches = VJEPA.generate_target_patches(
             patch_dim=self.patch_embed.patch_shape,
             aspect_ratio=target_aspect_ratio,

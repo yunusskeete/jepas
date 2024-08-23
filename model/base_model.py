@@ -1,5 +1,5 @@
 import copy
-from typing import Any, List, Literal, Optional, Tuple, Union
+from typing import Any, List, Literal, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -272,8 +272,23 @@ class JEPA_base(VisionTransformer):
         aspect_ratio: Number,
         scale: Number,
         num_target_blocks: int,
-    ) -> int:
-        """Placeholder function"""
+    ) -> Tuple[List[List[int]], Set[int]]:
+        """
+        (Placeholder function)
+
+        Generate (spatial/spatio-temporal) target patches for each 2D/3D target block.
+
+        Args:
+            patch_dim (Union[Tuple[int, int], Tuple[int, int, int]]): The number of patches in each dimension (height, width)/(temporal, height, width).
+            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
+            scale (Number): Scaling factor for the number of patches in the target block.
+            num_target_blocks (int): Number of target blocks to generate.
+
+        Returns:
+            Tuple[List[List[int]], Set[int]]:
+                - target_patches: A list of lists containing indices of patches for each target block.
+                - all_patches: A set of all unique patches used in target blocks.
+        """
         raise NotImplementedError()
 
     @staticmethod
@@ -281,7 +296,20 @@ class JEPA_base(VisionTransformer):
         patch_dim: Union[Tuple[int, int], Tuple[int, int, int]],
         aspect_ratio: Number,
         scale: Number,
-        target_patches_to_exclude: List[int],
+        target_patches_to_exclude: Set[int],
     ) -> List[int]:
-        """Placeholder function"""
+        """
+        (Placeholder function)
+
+        Generate a list of patch indices for the 2D/3D context block, excluding target patches.
+
+        Args:
+            patch_dim (Union[Tuple[int, int], Tuple[int, int, int]]): Dimensions of the patches (height, width)/(temporal, height, width).
+            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
+            scale (Number): Scaling factor for the number of patches in the context block.
+            target_patches_to_exclude (Set[int]): Set containing indices of target patches.
+
+        Returns:
+            List[int]: A list of patch indices for the context block excluding target patches.
+        """
         raise NotImplementedError()
