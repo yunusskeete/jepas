@@ -56,7 +56,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         seed: Optional[int] = None,
     ) -> int:
         """
-        Randomly selects the patch defining the block's starting position (on a linear index).
+        Randomly selects the patch defining the 2D block's starting position (on a linear index).
 
         Parameters:
         patch_dim (Tuple[int, int]): A tuple containing the number of patches in each dimension (width and height).
@@ -518,21 +518,21 @@ class VJEPA(JEPA_base, pl.LightningModule):
         Randomly selects the patch defining the 3D block's starting position (on a linear index).
 
         Parameters:
-        patch_dim (Tuple[int, int, int]): A tuple containing the temporal dimension, width and height of the 3D patch.
-        block_dim (Tuple[int, int, int]): A tuple containing the temporal dimension, width and height of the 3D block from which the patch is to be extracted.
+        patch_dim (Tuple[int, int, int]): A tuple containing the number of patches in each dimension (temporal dimension, width and height).
+        block_dim (Tuple[int, int, int]): A tuple containing the number of patches in each dimension (temporal dimension, width and height) of the block from which the patch is to be extracted.
         seed (Optional[int]): An optional random seed for reproducibility.
 
         Returns:
         int: The starting position of the patch within the block, represented as a linear index.
 
         NOTE:
-        Patches are the basic (processing) units of the image (e.g. 16x16 pixels).
+        Patches are the basic (processing) units of the video (e.g. num_framesx16x16 pixels).
         Blocks are larger regions composed of multiple patches.
-        In training, the model attempts to understand blocks within an image - ie. context blocks - by processing it one patch at a time,
-        and uses this understanding is used to predict the structure and content of (the target blocks within) an image in a more abstract way.
+        In training, the model attempts to understand blocks within an video - ie. context blocks - by processing it one patch at a time,
+        and uses this understanding is used to predict the structure and content of (the target blocks within) a video in a more abstract way.
 
         Linear index coordinates are used to define the starting patch for a block,
-        and map 2D pixel coordinates onto a 1D array index (flattened form).
+        and map 3D pixel coordinates onto a 1D array index (flattened form).
         """
         if seed is not None:
             torch.manual_seed(seed)  # Set the random seed for reproducibility
