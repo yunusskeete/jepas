@@ -1,11 +1,14 @@
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 
+import numpy as np
 import pytorch_lightning as pl
 import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+
+# pylint: disable=redefined-outer-name
 
 
 class ImageDataset(Dataset):
@@ -21,9 +24,11 @@ class ImageDataset(Dataset):
             ".JPEG",
             ".PNG",
         ],
+        shuffle: bool = True,
         transform: Optional[transforms.Compose] = None,
     ):
         super().__init__()
+        self.shuffle = shuffle
         # https://github.com/pytorch/examples/blob/42e5b996718797e45c46a25c55b031e6768f8440/imagenet/main.py#L89-L101
         self.transform = transform or transforms.Compose(
             [
@@ -49,6 +54,8 @@ class ImageDataset(Dataset):
         self.image_paths: List[Path] = []
         for ext in image_file_extensions:
             self.image_paths.extend(self.data_path.rglob(f"*{ext}"))
+        if self.shuffle:
+            np.random.shuffle(self.image_paths)  # In place shuffle
 
     def __len__(self) -> int:
         return len(self.image_paths)
@@ -97,17 +104,26 @@ class ImageDataModule(pl.LightningDataModule):
 
         self.train_dataset = None
         self.val_dataset = None
+        self.test_dataset = None
 
     def setup(self, stage=None):
         self.train_dataset = ImageDataset(
             dataset_path=self.dataset_path,
             stage="train",
             image_file_extensions=self.image_file_extensions,
+            shuffle=self.shuffle,
         )
         self.val_dataset = ImageDataset(
             dataset_path=self.dataset_path,
             stage="val",
             image_file_extensions=self.image_file_extensions,
+            shuffle=self.shuffle,
+        )
+        self.test_dataset = ImageDataset(
+            dataset_path=self.dataset_path,
+            stage="test",
+            image_file_extensions=self.image_file_extensions,
+            shuffle=self.shuffle,
         )
 
     def train_dataloader(self):
@@ -116,12 +132,21 @@ class ImageDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            shuffle=self.shuffle,
+            shuffle=False,
         )
 
     def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            shuffle=False,
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            self.test_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,

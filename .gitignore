@@ -5,7 +5,9 @@ data/
 /lightning_logs
 /lightning_logs1
 /lightning_logs2
+log/
 
 JEPA.drawio
 .$JEPA.drawio.bkp
 *.ipynb
+!t.ipynb

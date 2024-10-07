@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (  # ModelCheckpoint,
@@ -21,7 +22,7 @@ if __name__ == "__main__":
 
     dataset = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=8,
+        batch_size=4,
         frames_per_clip=16,
         pin_memory=True,
         prefetch_factor=4,
@@ -48,4 +49,10 @@ if __name__ == "__main__":
         logger=logger,
     )
 
-    trainer.fit(model, dataset)
+    # Path to the checkpoint to resume from (use the latest checkpoint if available)
+    checkpoint_path: Optional[str] = (
+        # "lightning_logs/v-jepa/version_22/checkpoints/epoch=3-step=120620.ckpt"
+        None
+    )
+
+    trainer.fit(model, dataset, ckpt_path=checkpoint_path)

@@ -5,6 +5,7 @@ from pytorch_lightning.callbacks import (  # ModelCheckpoint,
     LearningRateMonitor,
     ModelSummary,
 )
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from datasets import ImageDataModule
 from model import IJEPA
@@ -19,7 +20,9 @@ if __name__ == "__main__":
     ).resolve()  # Path to ImageNet dataset
 
     dataset = ImageDataModule(
-        dataset_path=dataset_path, batch_size=128, pin_memory=False
+        dataset_path=dataset_path,
+        batch_size=128,
+        pin_memory=True,
     )
 
     model = IJEPA(lr=4e-3)
@@ -27,13 +30,20 @@ if __name__ == "__main__":
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
 
+    # TensorBoard Logger
+    logger = TensorBoardLogger(
+        "lightning_logs",
+        name="i-jepa",
+    )
+
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=1,
         precision="32-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
         max_epochs=15,
-        callbacks=[lr_monitor, model_summary],
         gradient_clip_val=0.1,
+        callbacks=[lr_monitor, model_summary],
+        logger=logger,
     )
 
     trainer.fit(model, dataset)

@@ -8,7 +8,7 @@ from utils.types import ensure_tuple
 
 
 # Adapted from https://towardsdatascience.com/implementing-visualttransformer-in-pytorch-184f9f16f632
-class PatchEmbed(nn.Module):
+class PatchEmbed2D(nn.Module):
     """
     Image to Patch Embedding
 
@@ -44,7 +44,7 @@ class PatchEmbed(nn.Module):
             in_channels=in_chans,
             out_channels=embed_dim,
             kernel_size=patch_size,
-            stride=patch_size,
+            stride=patch_size,  # Same stride as the patch_size as to extract non-overlapping patches
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -108,7 +108,11 @@ class PatchEmbed3D(nn.Module):
                 patch_size[0],
                 patch_size[1],
             ),
-            stride=(tubelet_size, patch_size[0], patch_size[1]),
+            stride=(
+                tubelet_size,
+                patch_size[0],
+                patch_size[1],
+            ),  # Same stride as the patch_size as to extract non-overlapping patches
         )
 
     def forward(self, x, **kwargs):

@@ -1,15 +1,23 @@
+import copy
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+import transformers
+from transformers import BertConfig, BertModel, BertTokenizer
+from x_transformers import Encoder
 
 from utils.types import Number
 
 from .base_model import JEPA_base
+from .predictor import Predictor
 
 # pylint: disable=pointless-string-statement
+
+BERT_MODEL_NAME: str = "bert-base-uncased"
+PRETRAINED_TEXT_ENCODER: bool = True
 
 
 class IJEPA(JEPA_base, pl.LightningModule):
@@ -25,6 +33,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         num_target_blocks: int = 4,  # number of distinct target blocks per image
         m: float = 0.996,  # momentum
         momentum_limits: Tuple[float, float] = (0.996, 1.0),
+        testing_purposes_only: bool = False,
         **kwargs,
     ):
         pl.LightningModule.__init__(self)
@@ -34,7 +43,8 @@ class IJEPA(JEPA_base, pl.LightningModule):
             num_target_blocks=num_target_blocks,
             **kwargs,
         )
-        self.save_hyperparameters()
+        if not testing_purposes_only:
+            self.save_hyperparameters()
 
         # Define hyperparameters
         self.lr = lr
@@ -56,7 +66,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         seed: Optional[int] = None,
     ) -> int:
         """
-        Randomly selects the patch defining the block's starting position (on a linear index).
+        Randomly selects the patch defining the 2D block's starting position (on a linear index).
 
         Parameters:
         patch_dim (Tuple[int, int]): A tuple containing the number of patches in each dimension (width and height).
@@ -118,6 +128,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         aspect_ratio: Number,
         scale: Number,
         num_target_blocks: int,
+        seed: Optional[int] = None,
     ) -> Tuple[List[List[int]], Set[int]]:
         """
         Generate (spatial) target patches for each 2D target block.
@@ -127,12 +138,14 @@ class IJEPA(JEPA_base, pl.LightningModule):
             aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
             scale (Number): Scaling factor for the number of patches in the target block.
             num_target_blocks (int): Number of target blocks to generate.
+            seed (Optional[int]): An optional random seed for reproducibility.
 
         Returns:
             Tuple[List[List[int]], Set[int]]:
                 - target_patches: A list of lists containing indices of patches for each target block.
                 - all_patches: A set of all unique patches used in target blocks.
         """
+
         # Extract the number of patches in each dimension
         num_patches_h, num_patches_w = patch_dim
 
@@ -156,11 +169,15 @@ class IJEPA(JEPA_base, pl.LightningModule):
         target_patches: List[List[int]] = []
         all_patches: Set[int] = set()  # Using a set for fast membership checks
 
+        _target_patches: List[List[int]] = []
+        _all_patches: Set[int] = set()  # Using a set for fast membership checks
+
         # For each of the target blocks to generate
-        for _ in range(num_target_blocks):
+        for target_block_idx in range(num_target_blocks):
             start_patch: int = IJEPA.randomly_select_starting_patch_for_block(
                 patch_dim=patch_dim,
                 block_dim=block_dim,
+                seed=target_block_idx * seed if seed is not None else None,
             )
 
             # Initialize list to hold the patches for the target block
@@ -178,6 +195,26 @@ class IJEPA(JEPA_base, pl.LightningModule):
             # Store the patches for the current target block
             target_patches.append(patches)
 
+            # Generate all patch indices in block using tensor operations
+            h = torch.arange(num_blocks_h)
+            w = torch.arange(num_blocks_w)
+            hw_grid = torch.cartesian_prod(
+                h, w
+            )  # Efficiently generates all combinations of h, w
+
+            block_patch_indices = start_patch + (
+                hw_grid[:, 0] * num_patches_w + hw_grid[:, 1]
+            )
+
+            _target_patches.append(block_patch_indices.tolist())
+            _all_patches.update(block_patch_indices.tolist())
+
+        assert len(target_patches) == len(_target_patches)
+        assert len(all_patches) == len(_all_patches)
+
+        assert target_patches == _target_patches
+        assert all_patches == _all_patches
+
         return target_patches, all_patches
 
     @staticmethod
@@ -186,6 +223,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         aspect_ratio: Number,
         scale: Number,
         target_patches_to_exclude: Set[int],
+        seed: Optional[int] = None,
     ) -> List[int]:
         """
         Generate a list of patch indices for the 2D context block, excluding target patches.
@@ -195,6 +233,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
             aspect_ratio (Number): Aspect ratio to be maintained for the context block.
             scale (Number): Scaling factor for the number of patches in the context block.
             target_patches_to_exclude (Set[int]): Set containing indices of target patches.
+            seed (Optional[int]): An optional random seed for reproducibility.
 
         Returns:
             List[int]: A list of patch indices for the context block excluding target patches.
@@ -222,23 +261,39 @@ class IJEPA(JEPA_base, pl.LightningModule):
         start_patch: int = IJEPA.randomly_select_starting_patch_for_block(
             patch_dim=patch_dim,
             block_dim=block_dim,
+            seed=seed,
         )
 
-        # Generate indices for the context block
-        h_indices: np.array
-        w_indices: np.array
-        h_indices, w_indices = np.meshgrid(
-            np.arange(num_blocks_h), np.arange(num_blocks_w), indexing="ij"
+        context_patches_set: Set[int] = set()
+        # Collect patches within the context block
+        for h in range(num_blocks_h):
+            for w in range(num_blocks_w):
+                patch_start_position: int = start_patch + h * num_patches_w + w
+                context_patches_set.add(patch_start_position)
+
+        # Exclude the target patches
+        context_patches: List[int] = list(
+            context_patches_set.difference(target_patches_to_exclude)
         )
 
-        linear_indices: np.array = start_patch + (
-            h_indices.flatten() * num_patches_w + w_indices.flatten()
+        h = torch.arange(num_blocks_h)
+        w = torch.arange(num_blocks_w)
+        hw_grid = torch.cartesian_prod(h, w)
+
+        _context_patches_tensor: torch.Tensor = start_patch + (
+            +hw_grid[:, 0] * num_patches_w + hw_grid[:, 1]
         )
 
-        # Exclude target patches
-        context_patches: List[int] = np.setdiff1d(
-            linear_indices, np.array(target_patches_to_exclude), assume_unique=True
-        ).tolist()
+        _context_patches_set = set(_context_patches_tensor.tolist())
+
+        _context_patches: List[int] = list(
+            _context_patches_set.difference(target_patches_to_exclude)
+        )
+
+        assert len(context_patches) == len(_context_patches)
+        assert context_patches == _context_patches
+
+        print("Assertions passed")
 
         return context_patches
 
@@ -483,6 +538,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         m: float = 0.996,  # momentum
         momentum_limits: Tuple[float, float] = (0.996, 1.0),
         num_frames: int = 16,
+        testing_purposes_only: bool = False,
         **kwargs,
     ):
         pl.LightningModule.__init__(self)
@@ -493,7 +549,8 @@ class VJEPA(JEPA_base, pl.LightningModule):
             num_frames=num_frames,
             **kwargs,
         )
-        self.save_hyperparameters()
+        if not testing_purposes_only:
+            self.save_hyperparameters()
 
         # Define hyperparameters
         self.lr = lr
@@ -518,21 +575,21 @@ class VJEPA(JEPA_base, pl.LightningModule):
         Randomly selects the patch defining the 3D block's starting position (on a linear index).
 
         Parameters:
-        patch_dim (Tuple[int, int, int]): A tuple containing the temporal dimension, width and height of the 3D patch.
-        block_dim (Tuple[int, int, int]): A tuple containing the temporal dimension, width and height of the 3D block from which the patch is to be extracted.
+        patch_dim (Tuple[int, int, int]): A tuple containing the number of patches in each dimension (temporal dimension, width and height).
+        block_dim (Tuple[int, int, int]): A tuple containing the number of patches in each dimension (temporal dimension, width and height) of the block from which the patch is to be extracted.
         seed (Optional[int]): An optional random seed for reproducibility.
 
         Returns:
         int: The starting position of the patch within the block, represented as a linear index.
 
         NOTE:
-        Patches are the basic (processing) units of the image (e.g. 16x16 pixels).
+        Patches are the basic (processing) units of the video (e.g. num_framesx16x16 pixels).
         Blocks are larger regions composed of multiple patches.
-        In training, the model attempts to understand blocks within an image - ie. context blocks - by processing it one patch at a time,
-        and uses this understanding is used to predict the structure and content of (the target blocks within) an image in a more abstract way.
+        In training, the model attempts to understand blocks within an video - ie. context blocks - by processing it one patch at a time,
+        and uses this understanding is used to predict the structure and content of (the target blocks within) a video in a more abstract way.
 
         Linear index coordinates are used to define the starting patch for a block,
-        and map 2D pixel coordinates onto a 1D array index (flattened form).
+        and map 3D pixel coordinates onto a 1D array index (flattened form).
         """
         if seed is not None:
             torch.manual_seed(seed)  # Set the random seed for reproducibility
@@ -579,6 +636,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         aspect_ratio: Number,
         scale: Number,
         num_target_blocks: int,
+        seed: Optional[int] = None,
     ) -> Tuple[List[List[int]], Set[int]]:
         """
         Generate (spatio-temporal) target patches for each 3D target block.
@@ -588,12 +646,14 @@ class VJEPA(JEPA_base, pl.LightningModule):
             aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
             scale (Number): Scaling factor for the number of patches in the target block.
             num_target_blocks (int): Number of target blocks to generate.
+            seed (Optional[int]): An optional random seed for reproducibility.
 
         Returns:
             Tuple[List[List[int]], Set[int]]:
                 - target_patches: A list of lists containing indices of patches for each target block.
                 - all_patches: A set of all unique patches used in target blocks.
         """
+
         # Extract the number of patches in each dimension
         num_patches_t, num_patches_h, num_patches_w = patch_dim
 
@@ -620,11 +680,15 @@ class VJEPA(JEPA_base, pl.LightningModule):
         target_patches: List[List[int]] = []
         all_patches: Set[int] = set()  # Using a set for fast membership checks
 
+        _target_patches: List[List[int]] = []
+        _all_patches: Set[int] = set()  # Using a set for fast membership checks
+
         # For each of the target blocks to generate
-        for _ in range(num_target_blocks):
+        for target_block_idx in range(num_target_blocks):
             start_patch: int = VJEPA.randomly_select_starting_patch_for_block(
                 patch_dim=patch_dim,
                 block_dim=block_dim,
+                seed=target_block_idx * seed if seed is not None else None,
             )
 
             # Initialize list to hold the patches for the target block
@@ -648,6 +712,31 @@ class VJEPA(JEPA_base, pl.LightningModule):
             # Store the patches for the current target block
             target_patches.append(patches)
 
+            # Generate all patch indices in block using tensor operations
+            t = torch.arange(num_patches_t)
+            h = torch.arange(num_blocks_h)
+            w = torch.arange(num_blocks_w)
+            thw_grid = torch.cartesian_prod(
+                t, h, w
+            )  # Efficiently generates all combinations of t, h, w
+
+            block_patch_indices = start_patch + (
+                thw_grid[:, 0] * (num_patches_h * num_patches_w)
+                + thw_grid[:, 1] * num_patches_w
+                + thw_grid[:, 2]
+            )
+
+            _target_patches.append(block_patch_indices.tolist())
+            _all_patches.update(block_patch_indices.tolist())
+
+        assert len(target_patches) == len(_target_patches)
+        assert len(all_patches) == len(_all_patches)
+
+        assert target_patches == _target_patches
+        assert all_patches == _all_patches
+
+        print("Assertions passed")
+
         return target_patches, all_patches
 
     @staticmethod
@@ -656,6 +745,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         aspect_ratio: Number,
         scale: Number,
         target_patches_to_exclude: Set[int],
+        seed: Optional[int] = None,
     ) -> List[int]:
         """
         Generate a list of patch indices for the 3D context block, excluding target patches.
@@ -665,10 +755,12 @@ class VJEPA(JEPA_base, pl.LightningModule):
             aspect_ratio (Number): Aspect ratio to be maintained for the context block.
             scale (Number): Scaling factor for the number of patches in the context block.
             target_patches_to_exclude (Set[int]): Set containing indices of target patches.
+            seed (Optional[int]): An optional random seed for reproducibility.
 
         Returns:
             List[int]: A list of patch indices for the context block excluding target patches.
         """
+
         # Extract the number of patches in each dimension
         num_patches_t, num_patches_h, num_patches_w = patch_dim
 
@@ -695,29 +787,49 @@ class VJEPA(JEPA_base, pl.LightningModule):
         start_patch: int = VJEPA.randomly_select_starting_patch_for_block(
             patch_dim=patch_dim,
             block_dim=block_dim,
+            seed=seed,
         )
 
-        # Generate indices for the context block
-        t_indices: np.array
-        h_indices: np.array
-        w_indices: np.array
-        t_indices, h_indices, w_indices = np.meshgrid(
-            np.arange(num_blocks_t),
-            np.arange(num_blocks_h),
-            np.arange(num_blocks_w),
-            indexing="ij",
+        context_patches_set: Set[int] = set()
+        # Collect patches within the context block
+        for t in range(num_blocks_t):
+            for h in range(num_blocks_h):
+                for w in range(num_blocks_w):
+                    patch_start_position: int = (
+                        start_patch
+                        + (t * (num_patches_h * num_patches_w))
+                        + (h * num_patches_w)
+                        + w
+                    )
+
+                    context_patches_set.add(patch_start_position)
+
+        # Store the patches for the current context block
+        context_patches = list(
+            context_patches_set.difference(target_patches_to_exclude)
         )
 
-        linear_indices: np.array = start_patch + (
-            t_indices.flatten() * (num_patches_h * num_patches_w)
-            + h_indices.flatten() * num_patches_w
-            + w_indices.flatten()
+        t = torch.arange(num_patches_t)
+        h = torch.arange(num_blocks_h)
+        w = torch.arange(num_blocks_w)
+        thw_grid = torch.cartesian_prod(t, h, w)
+
+        _context_patches_tensor: torch.Tensor = start_patch + (
+            thw_grid[:, 0] * (num_patches_h * num_patches_w)
+            + thw_grid[:, 1] * num_patches_w
+            + thw_grid[:, 2]
         )
 
-        # Exclude target patches
-        context_patches: List[int] = np.setdiff1d(
-            linear_indices, np.array(target_patches_to_exclude), assume_unique=True
-        ).tolist()
+        _context_patches_set = set(_context_patches_tensor.tolist())
+
+        _context_patches: List[int] = list(
+            _context_patches_set.difference(target_patches_to_exclude)
+        )
+
+        assert len(context_patches) == len(_context_patches)
+        assert context_patches == _context_patches
+
+        print("Assertions passed")
 
         return context_patches
 
@@ -744,12 +856,6 @@ class VJEPA(JEPA_base, pl.LightningModule):
             scale=context_scale,
             target_patches_to_exclude=all_unique_target_patches,
         )
-
-        # x: torch.Tensor = (
-        #     x.permute(  # (batch_size, time, channels, img_height, img_width)
-        #         0, 2, 1, 3, 4
-        #     )
-        # )  # (batch_size, channels, time, height, width)
 
         return self.forward_base(
             x=x,
@@ -790,52 +896,64 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
     def training_step(  # pylint: disable=arguments-differ
         self,
-        batch: torch.Tensor,
+        batch: List[torch.Tensor],
         batch_idx: int,  # pylint: disable=unused-argument
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
         """
-        _summary_
+        Perform a training step for each video clip (tensor) in the batch of clips (list of tensors).
 
         Parameters
         ----------
-        batch : torch.Tensor
-            _description_
+        batch : List[torch.Tensor]
+            A list of tensors representing the batch of data (video clips).
         batch_idx : int
-            _description_
+            Index of the batch in the current epoch.
 
         Returns
         -------
         torch.Tensor
-            _description_
+            The aggregated loss for the batch.
         """
-        # Generate random target and context aspect ratio and scale
-        target_aspect_ratio: float = np.random.uniform(
-            self.target_aspect_ratio[0], self.target_aspect_ratio[1]
-        )
-        target_scale: float = np.random.uniform(
-            low=self.target_scale_interval[0], high=self.target_scale_interval[1]
-        )
+        # Initialize the running loss to zero
+        running_loss: torch.Tensor = torch.tensor(0.0, device=self.device)
 
-        context_scale: float = np.random.uniform(
-            self.context_scale[0], self.context_scale[1]
-        )
+        for clip in batch:
+            # Generate random target and context aspect ratio and scale
+            target_aspect_ratio: float = np.random.uniform(
+                self.target_aspect_ratio[0], self.target_aspect_ratio[1]
+            )
+            target_scale: float = np.random.uniform(
+                low=self.target_scale_interval[0], high=self.target_scale_interval[1]
+            )
 
-        (
-            y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-            y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-        ) = self(
-            x=batch,  # (batch_size, time, channels, img_height, img_width)
-            target_aspect_ratio=target_aspect_ratio,
-            target_scale=target_scale,
-            context_aspect_ratio=self.context_aspect_ratio,
-            context_scale=context_scale,
-        )
+            context_scale: float = np.random.uniform(
+                self.context_scale[0], self.context_scale[1]
+            )
 
-        loss: torch.Tensor = self.criterion(y_student, y_teacher)
-        self.log("train_loss", loss)
+            (
+                y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+                y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+            ) = self(
+                x=batch,  # (batch_size, time, channels, img_height, img_width)
+                target_aspect_ratio=target_aspect_ratio,
+                target_scale=target_scale,
+                context_aspect_ratio=self.context_aspect_ratio,
+                context_scale=context_scale,
+            )
 
-        return loss
+            # Compute the loss for the current clip
+            loss: torch.Tensor = self.criterion(y_student, y_teacher)
+
+            # Accumulate the loss
+            running_loss += loss
+
+        # Normalize the running loss by the batch size
+        running_loss /= len(batch)
+
+        self.log("train_loss", running_loss)
+
+        return running_loss
 
     def validation_step(  # pylint: disable=arguments-differ
         self,
@@ -952,3 +1070,272 @@ class VJEPA(JEPA_base, pl.LightningModule):
                 "interval": "step",
             },
         }
+
+
+class TJEPA(pl.LightningModule):
+    def __init__(
+        self,
+        embed_dim: int = 64,
+        enc_depth: int = 8,
+        num_heads: int = 8,
+        layer_dropout: float = 0.0,
+        decoder_depth: int = 6,
+        lr: float = 1e-3,
+        weight_decay: float = 0.05,
+        target_scale_interval: Tuple[float, float] = (0.15, 0.2),
+        context_scale: Tuple[float, float] = (0.85, 1.0),
+        num_target_blocks: int = 4,  # number of distinct target blocks per image
+        m: float = 0.996,  # momentum
+        momentum_limits: Tuple[float, float] = (0.996, 1.0),
+        **kwargs,
+    ):
+        pl.LightningModule.__init__(self)
+        self.save_hyperparameters()
+
+        # Define hyperparameters
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.m = m  # momentum
+        self.target_scale_interval = target_scale_interval
+        self.context_scale = context_scale
+
+        # Optimisation parameters
+        self.momentum_limits = momentum_limits
+        self.criterion = nn.MSELoss()
+
+        self.tokenizer: BertTokenizer = BertTokenizer.from_pretrained(BERT_MODEL_NAME)
+
+        self.bert_model: BertModel = (
+            BertModel.from_pretrained(BERT_MODEL_NAME)
+            if PRETRAINED_TEXT_ENCODER
+            else BertModel(
+                config=BertConfig()
+            )  # Load the default configuration for BERT (without pre-trained weights)
+        )
+
+        self.layer_dropout = layer_dropout
+
+        self.encoder = Encoder(
+            dim=embed_dim,
+            heads=num_heads,
+            depth=enc_depth,
+            layer_dropout=self.layer_dropout,
+        )  # student encoder
+
+        self.teacher_encoder = copy.deepcopy(
+            self.encoder
+        ).cuda()  # copy student encoder
+
+        self.fc = nn.Linear(
+            embed_dim, self.tokenizer.vocab_size
+        )  # Output layer to predict masked tokens
+
+        self.predictor = Predictor(
+            embed_dim=self.embed_dim,
+            num_heads=self.num_heads,
+            depth=decoder_depth,
+        )
+
+        self.num_target_blocks = num_target_blocks
+
+    # TODO: We don't randomly select the starting token like other JEPAs,
+    # all tokens but the target token are used as the context
+    @staticmethod
+    def randomly_select_starting_token(
+        sequence_length: int,
+        block_length: int,
+        seed: Optional[int] = None,
+    ) -> int:
+        """
+        Randomly selects the starting position of a block within a 1D sequence of tokens.
+
+        Parameters:
+        sequence_length (int): The total number of tokens in the sequence.
+        block_length (int): The number of tokens in the block.
+        seed (Optional[int]): An optional random seed for reproducibility.
+
+        Returns:
+        int: The starting position of the block within the sequence.
+
+        NOTE:
+        - Tokens are the basic units (e.g., words or subwords) of the sequence.
+        - Blocks are contiguous subsequences of tokens within the larger sequence.
+        - This function randomly selects the starting token for a block within the sequence.
+        """
+
+        if seed is not None:
+            torch.manual_seed(seed)  # Set the random seed for reproducibility
+
+        def random_int(limit: int) -> int:
+            return torch.randint(0, limit, (1,)).item()
+
+        max_start_index: int = sequence_length - block_length + 1
+
+        assert (
+            block_length <= sequence_length
+        ), f"Block length ({block_length}) cannot be greater than sequence length ({sequence_length})."
+
+        start_index: int = random_int(max_start_index)
+
+        return start_index
+
+    @staticmethod
+    def generate_target_tokens(
+        sequence_length: int,
+        scale: float,  # scale <= 1
+        num_target_blocks: int,
+        seed: Optional[int] = None,
+    ) -> Tuple[List[List[int]], Set[int]]:
+        """
+        Generate target tokens for each 1D block.
+
+        Args:
+            sequence_length (int): The total number of tokens in the sequence.
+            scale (float): Scaling factor for the length of the target block.
+            num_target_blocks (int): Number of target blocks to generate.
+            seed (Optional[int]): An optional random seed for reproducibility.
+
+        Returns:
+            Tuple[List[List[int]], Set[int]]:
+                - target_tokens: A list of lists containing indices of tokens for each target block.
+                - all_tokens: A set of all unique tokens used in target blocks.
+        """
+
+        # Calculate the length of each target block after applying the scale
+        scaled_block_length: int = int(sequence_length * scale)
+
+        assert (
+            scaled_block_length <= sequence_length
+        ), f"Scaled block length ({scaled_block_length}) cannot be greater than sequence length ({sequence_length})."
+
+        # Initialize structures to hold target tokens and all unique tokens
+        target_tokens: List[List[int]] = []
+        all_tokens: Set[int] = set()  # Using a set for fast membership checks
+
+        # For each of the target blocks to generate
+        for _ in range(num_target_blocks):
+            # Randomly select a starting token for the block
+            start_token: int = TJEPA.randomly_select_starting_token(
+                sequence_length=sequence_length,
+                block_length=scaled_block_length,
+                seed=seed,
+            )
+
+            # Initialize list to hold the tokens for the target block
+            tokens: List[int] = []
+            # Collect tokens within the target block
+            for i in range(scaled_block_length):
+                token_position: int = start_token + i
+
+                tokens.append(token_position)
+
+                # Only updated if the position is not already present
+                all_tokens.add(token_position)
+
+            # Store the tokens for the current target block
+            target_tokens.append(tokens)
+
+        return target_tokens, all_tokens
+
+    @staticmethod
+    def generate_context_tokens(
+        sequence_length: int,
+        scale: float,  # scale <= 1
+        target_tokens_to_exclude: Set[int],
+        seed: Optional[int] = None,
+    ) -> List[int]:
+        """
+        Generate a list of token indices for the 1D context block, excluding target tokens.
+
+        Args:
+            sequence_length (int): The total number of tokens in the sequence.
+            scale (float): Scaling factor for the length of the context block.
+            target_tokens_to_exclude (Set[int]): Set containing indices of target tokens.
+            seed (Optional[int]): An optional random seed for reproducibility.
+
+        Returns:
+            List[int]: A list of token indices for the context block excluding target tokens.
+        """
+
+        # Calculate the number of tokens in the context block
+        num_tokens_block: int = int(sequence_length * scale)
+
+        # Randomly select the starting token for the context block
+        start_token: int = TJEPA.randomly_select_starting_token(
+            sequence_length=sequence_length,
+            block_length=num_tokens_block,
+            seed=seed,
+        )
+
+        # Generate indices for the context block
+        linear_indices: np.array = np.array(
+            range(start_token, start_token + num_tokens_block)
+        )
+
+        # Exclude target tokens
+        context_tokens: List[int] = np.setdiff1d(
+            linear_indices, np.array(target_tokens_to_exclude), assume_unique=True
+        ).tolist()
+
+        return context_tokens
+
+    def forward(  # pylint: disable=arguments-differ
+        self,
+        x: torch.Tensor,
+        target_scale: float,
+        context_scale: float,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        target_patches: List[List[int]]
+        all_unique_target_patches: Set[int]
+        target_patches, all_unique_target_patches = TJEPA.generate_target_patches(
+            sequence_length=x.shape[
+                -1
+            ],  # The number of tokens in the input sequence???
+            scale=target_scale,
+            num_target_blocks=self.num_target_blocks,
+        )
+
+        context_patches: List[int] = TJEPA.generate_context_patches(
+            sequence_length=x.shape[
+                -1
+            ],  # The number of tokens in the input sequence???
+            scale=context_scale,
+            target_patches_to_exclude=all_unique_target_patches,
+        )
+
+        return self.forward_base(
+            x=x,  # (batch_size, seq_length)
+            target_patches=target_patches,
+            context_patches=context_patches,
+        )
+
+    def update_momentum(self, m: float) -> None:
+        """
+        Update the teacher model parameters using momentum.
+
+        Args:
+            m (float): Momentum coefficient for the exponential moving average update.
+        """
+        # Enable eval mode to disable layers like dropout and batch normalization
+        student_model: nn.Module = self.encoder.eval()
+        teacher_model: nn.Module = self.teacher_encoder.eval()
+
+        """
+        Manual parameter updates:
+        Manually update the teacher's parameters using a momentum term, ensuring
+        that the teacher's parameters are a smoothed version of the student's parameters,
+        thus reducing the noise and fluctuations in the learning process.
+
+        This smoothing provides more consistent and stable targets for the student to learn from,
+        increasing training efficacy. Additionally, this decoupling permits more exploration in the
+        student without directly affecting the teacher's parameters, preventing the student from
+        overfitting to the techer's instantaneous updates.
+        """
+        # Disable gradient computation
+        with torch.no_grad():
+            for student_param, teacher_param in zip(
+                student_model.parameters(), teacher_model.parameters()
+            ):
+                teacher_param.data.mul_(other=m).add_(
+                    other=student_param.data, alpha=1 - m
+                )

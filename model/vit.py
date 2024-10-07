@@ -6,7 +6,7 @@ from x_transformers import Encoder
 
 from utils.types import ensure_tuple
 
-from .patch_embed import PatchEmbed, PatchEmbed3D
+from .patch_embed import PatchEmbed2D, PatchEmbed3D
 
 
 class VisionTransformer(nn.Module):
@@ -37,7 +37,7 @@ class VisionTransformer(nn.Module):
         self.num_heads = num_heads
 
         self.patch_embed: nn.Module = (
-            PatchEmbed(
+            PatchEmbed2D(
                 img_size=img_size,
                 patch_size=patch_size,
                 in_chans=in_chans,
@@ -53,24 +53,9 @@ class VisionTransformer(nn.Module):
                 embed_dim=embed_dim,
             )
         )
-        # self.patch_dim: Tuple[int, int] = (
-        #     self.patch_embed.patch_shape[-2],
-        #     self.patch_embed.patch_shape[-1],
-        # )
         self.num_patches: int = int(
             torch.prod(torch.Tensor(self.patch_embed.patch_shape)).item()
         )
-        # self.num_patches: int = (
-        #     self.patch_embed.patch_shape[-2] * self.patch_embed.patch_shape[-1]
-        #     if not self.is_video
-        #     else (
-        #         self.patch_embed.patch_shape[-2]
-        #         * self.patch_embed.patch_shape[-1]
-        #         * (
-        #             num_frames // self.patch_embed.patch_shape[0]
-        #         )  # self.patch_embed.patch_shape[0] = tubelet_size
-        #     )
-        # )
 
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches, embed_dim))
 

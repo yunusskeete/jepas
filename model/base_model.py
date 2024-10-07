@@ -31,8 +31,12 @@ class JEPA_base(VisionTransformer):
             nn.LayerNorm(self.embed_dim) if self.post_enc_norm else nn.Identity()
         )
 
-        self.teacher_encoder = copy.deepcopy(self.encoder).cuda()  # student encoder
+        self.teacher_encoder = copy.deepcopy(
+            self.encoder
+        ).cuda()  # copy student encoder
 
+        # TODO: To help prevent colapse and prioritise expressive representations
+        # in the encoder, the decoder should be underpowered with respect to the encoder.
         self.predictor = Predictor(
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
@@ -75,7 +79,7 @@ class JEPA_base(VisionTransformer):
             target_blocks_list.append(
                 x[
                     :,  # Include batch dim
-                    target_patches_for_block,  # Include only this patch
+                    target_patches_for_block,  # Include only selected patches
                     :,  # Include all embed dim
                 ]
             )
@@ -100,14 +104,14 @@ class JEPA_base(VisionTransformer):
             context_patches (List[int]): List containing indices of context patches.
 
         Returns:
-            torch.Tensor: A tensor containing the context block with target patches excluded.
+            torch.Tensor: A tensor containing the context block with target patches excluded of shape (batch_size, num_context_patches, embed_dim).
         """
         # Return the context block tensor excluding target patches
         context_block: torch.Tensor = x[
             :,  # Include batch dim
-            context_patches,  # Include only this patch
+            context_patches,  # Include only selected patches
             :,  # Include all embed dim
-        ]  # (batch_size, num_patches, embed_dim)
+        ]  # (batch_size, num_context_patches, embed_dim)
 
         return context_block
 
@@ -120,7 +124,30 @@ class JEPA_base(VisionTransformer):
         target_patches: List[List[int]],
         context_encoding: torch.Tensor,
     ) -> torch.Tensor:
-        """(Image/video invariant)"""
+        """
+        (Image/video invariant)
+
+        Generates predictions for target blocks in an image/video sequence using a transformer decoder.
+
+        This function operates on context encoding obtained from a Vision Transformer (ViT) model, making predictions
+        for specified target blocks. The target blocks are specified by `target_patches`, and the context encoding is
+        enriched with positional information before being processed by a transformer decoder to produce the final predictions.
+
+        Args:
+            num_target_blocks (int): The number of target blocks to generate predictions for.
+            batch_dim (int): The batch size dimension, representing the number of sequences being processed in parallel.
+            num_patches (int): The number of patches in each target block.
+            embed_dim (int): The embedding dimension for each patch.
+            target_patches (List[List[int]]): A list of lists, where each inner list contains the patch indices corresponding
+                                              to a target block.
+            context_encoding (torch.Tensor): A tensor of shape (batch_dim, num_context_patches, embed_dim) containing the
+                                             context encoding from the ViT model, enriched with positional encodings.
+
+        Returns:
+            torch.Tensor: A tensor of shape (num_target_blocks, batch_dim, num_patches, embed_dim) containing the predicted
+                          embeddings for each target block. Each target block's prediction is based on the context encoding
+                          and the masked target tokens, which are processed by a transformer decoder.
+        """
         # Initialize tensor to hold prediction blocks
         prediction_blocks = torch.zeros(
             (num_target_blocks, batch_dim, num_patches, embed_dim)
@@ -167,7 +194,8 @@ class JEPA_base(VisionTransformer):
         context_patches: List[int],
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         """
-        (Image/video invariant - just ensure that the target/context patches are right)
+        (Image/video invariant)
+
         Forward pass for generating predictions and targets within the JEPA architecture.
 
         Args:
@@ -263,7 +291,28 @@ class JEPA_base(VisionTransformer):
         block_dim: Union[Tuple[int, int], Tuple[int, int, int]],
         seed: Optional[int] = None,
     ) -> int:
-        """Placeholder function"""
+        """
+        (Placeholder function)
+
+        Randomly selects the patch defining the 2D/3D block's starting position (on a linear index).
+
+        Parameters:
+        patch_dim (Union[Tuple[int, int], Tuple[int, int, int]]): A tuple containing the number of patches in each dimension (width and height)/(temporal dimension, width and height).
+        block_dim (Union[Tuple[int, int], Tuple[int, int, int]]): A tuple containing the number of patches in each dimension (width and height)/(temporal dimension, width and height) of the block from which the patch is to be extracted.
+        seed (Optional[int]): An optional random seed for reproducibility.
+
+        Returns:
+        int: The starting position of the patch within the block, represented as a linear index.
+
+        NOTE:
+        Patches are the basic (processing) units of the image/video (e.g. 16x16/num_framesx16x16 pixels).
+        Blocks are larger regions composed of multiple patches.
+        In training, the model attempts to understand blocks within an image/video - ie. context blocks - by processing it one patch at a time,
+        and uses this understanding is used to predict the structure and content of (the target blocks within) an image/video in a more abstract way.
+
+        Linear index coordinates are used to define the starting patch for a block,
+        and map 2D/3D pixel coordinates onto a 1D array index (flattened form).
+        """
         raise NotImplementedError()
 
     @staticmethod

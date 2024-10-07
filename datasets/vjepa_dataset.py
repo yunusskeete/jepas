@@ -1,15 +1,14 @@
 """
 Usage:
-
 ```bash
 python -m datasets.vjepa_dataset
 ```
 """
 
 import os
-import warnings
+import warnings  # TODO: Change to logger
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import List, Literal, Optional, Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -19,6 +18,8 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 from dataset_utils.video.transforms import make_transforms
+
+# pylint: disable=redefined-outer-name
 
 
 class VideoDataset(Dataset):
@@ -32,9 +33,10 @@ class VideoDataset(Dataset):
             ".mov",
             ".mkv",
         ],
-        frames_per_clip: int = 16,
-        frame_step: int = 4,
-        num_clips=1,
+        frames_per_clip: int = 16,  # TODO: Functionality not working
+        frame_step: int = 4,  # TODO: Functionality not working
+        num_clips: int = 1,  # TODO: Functionality not working
+        shuffle: bool = True,
         transform: Optional[transforms.Compose] = None,
         filter_short_videos: bool = False,
         filter_long_videos: int = int(10**9),  # bytes
@@ -45,6 +47,7 @@ class VideoDataset(Dataset):
         self.frames_per_clip = frames_per_clip
         self.frame_step = frame_step
         self.num_clips = num_clips
+        self.shuffle = shuffle
         # https://github.com/pytorch/examples/blob/42e5b996718797e45c46a25c55b031e6768f8440/imagenet/main.py#L89-L101
         self.transform = transform or make_transforms(
             random_horizontal_flip=True,
@@ -71,78 +74,79 @@ class VideoDataset(Dataset):
         self.video_paths: List[Path] = []
         for ext in video_file_extensions:
             self.video_paths.extend(self.data_path.rglob(f"*{ext}"))
+        if self.shuffle:
+            np.random.shuffle(self.video_paths)  # In place shuffle
 
     def __len__(self) -> int:
         return len(self.video_paths)
 
-    def __getitem__(self, index: int) -> Union[torch.Tensor, List[torch.Tensor]]:
+    def extract_video_clips(self, video: np.array) -> List[np.array]:
+        """Split video into a list of clips"""
+        return [
+            video[i * self.frames_per_clip : (i + 1) * self.frames_per_clip]
+            for i in range(self.num_clips)
+        ]
 
-        def split_into_clips(video: np.array) -> List[np.array]:
-            """Split video into a list of clips"""
-            return [
-                video[i * self.frames_per_clip : (i + 1) * self.frames_per_clip]
-                for i in range(self.num_clips)
-            ]
-
+    def __getitem__(self, index: int) -> List[torch.Tensor]:
         video_path: Path = self.video_paths[index]
 
-        # Retrieve a random video clip if video clip cannot be retrieved
-        while True:
-            buffer_np: np.array
-            buffer_np, _ = self.load_video_decord(video_path)
-            if len(buffer_np) > 0:
-                break
-            index: int = np.random.randint(self.__len__())
-            # pylint: disable=invalid-sequence-index
-            video_path: Path = self.video_paths[index]
+        if os.path.getsize(video_path) > self.filter_long_videos:
+            # Retry with a different video if this one is too large/long
+            warnings.warn(f"Skipping large/long video: {video_path.name}")
 
-        if self.num_clips > 1:
-            buffer_clips: List[np.array] = split_into_clips(buffer_np)
+            return self.__getitem__(np.random.randint(self.__len__()))
 
-            if self.transform is not None:
-                buffer_clips: List[np.array] = [
-                    self.transform(clip) for clip in buffer_clips
-                ]
+        batch_frames: np.array = self.load_batch_frames(video_path)
 
-            return buffer_clips
+        if len(batch_frames) == 0:
+            # Retry with a different video if this one fails
+            warnings.warn(f"Failed to load batch frames for video: {video_path.name}")
 
-        if self.transform is not None:
-            buffer: torch.Tensor = self.transform(buffer_np)
+            return self.__getitem__(np.random.randint(self.__len__()))
 
-            return buffer
-
-    def load_video_decord(self, video_path: Path) -> Tuple[np.array, np.array]:
-        if not os.path.exists(video_path):
-            warnings.warn(f"Video path not found: {video_path}")
-            return [], None
-
-        video_size = os.path.getsize(video_path)
-        if video_size > self.filter_long_videos:
-            warnings.warn(f"Skipping long video: {video_path}")
-            return [], None
-
-        try:
-            vr: VideoReader = VideoReader(str(video_path), ctx=cpu(0))
-        except Exception as e:
-            warnings.warn(f"Error loading video: {e}")
-            return [], None
-
-        max_frames: int = (
-            int(self.max_video_duration * vr.get_avg_fps())
-            if self.max_video_duration
-            else 10**100
+        batch_clips: List[np.array] = (
+            self.extract_video_clips(batch_frames)
+            if self.num_clips > 1
+            else [batch_frames]
         )
 
-        clip_len = self.frames_per_clip * self.frame_step
-        if self.filter_short_videos and len(vr) < clip_len:
-            warnings.warn(f"Skipping short video: {video_path}")
-            return [], None
+        # TODO: Check type - List[np.array] or List[torch.Tensor]
+        batch_clips: List[np.array] = [self.transform(clip) for clip in batch_clips]
 
-        indices: np.array = np.arange(0, clip_len, self.frame_step)
-        indices: np.array = np.clip(indices, 0, min(len(vr) - 1, max_frames))
-        buffer: np.array = vr.get_batch(indices).asnumpy()
+        return batch_clips
 
-        return buffer, indices
+    def load_batch_frames(self, video_path: Path) -> np.array:
+        try:
+            vr: VideoReader = VideoReader(str(video_path), ctx=cpu(0))
+
+            clip_len: int = self.frames_per_clip * self.frame_step
+
+            if self.filter_short_videos and len(vr) < clip_len:
+                warnings.warn(
+                    f"Skipping short video: {video_path.name}"
+                )  # TODO: Change to info log
+
+                return np.array([])
+
+            # Calculate the maximum number of frames based on the video duration and frame rate
+            max_frames: int = (
+                int(self.max_video_duration * vr.get_avg_fps())
+                if self.max_video_duration
+                else len(vr)
+            )
+            # Generate indices within the allowed frame range
+            indices: np.array = np.arange(0, min(max_frames, len(vr)), self.frame_step)
+
+            batch: np.array = vr.get_batch(
+                indices
+            ).asnumpy()  # TODO: Check if .asnumpy() is necessary
+
+            return batch
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            warnings.warn(f"Error loading video: {e}")
+
+            return np.array([])
 
 
 class VideoDataModule(pl.LightningDataModule):
@@ -156,7 +160,7 @@ class VideoDataModule(pl.LightningDataModule):
         pin_memory: bool = True,
         persistent_workers: bool = True,
         prefetch_factor: Optional[int] = None,
-        shuffle: bool = True,
+        shuffle: bool = False,
         video_file_extensions: Union[str, List[str]] = [
             ".mp4",
             ".avi",
@@ -193,6 +197,7 @@ class VideoDataModule(pl.LightningDataModule):
             video_file_extensions=self.video_file_extensions,
             frames_per_clip=self.frames_per_clip,
             num_clips=self.num_clips,
+            shuffle=self.shuffle,
         )
         self.val_dataset = VideoDataset(
             dataset_path=self.dataset_path,
@@ -200,6 +205,7 @@ class VideoDataModule(pl.LightningDataModule):
             video_file_extensions=self.video_file_extensions,
             frames_per_clip=self.frames_per_clip,
             num_clips=self.num_clips,
+            shuffle=self.shuffle,
         )
         self.test_dataset = VideoDataset(
             dataset_path=self.dataset_path,
@@ -207,6 +213,7 @@ class VideoDataModule(pl.LightningDataModule):
             video_file_extensions=self.video_file_extensions,
             frames_per_clip=self.frames_per_clip,
             num_clips=self.num_clips,
+            shuffle=self.shuffle,
         )
 
     def train_dataloader(self):
@@ -217,7 +224,7 @@ class VideoDataModule(pl.LightningDataModule):
             pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
             prefetch_factor=self.prefetch_factor,
-            shuffle=self.shuffle,
+            shuffle=False,
         )
 
     def val_dataloader(self):
