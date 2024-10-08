@@ -5,9 +5,9 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import transformers
 from transformers import BertConfig, BertModel, BertTokenizer
 from x_transformers import Encoder
+from x_transformers.x_transformers import ScaledSinusoidalEmbedding
 
 from utils.types import Number
 
@@ -1079,12 +1079,13 @@ class TJEPA(pl.LightningModule):
         enc_depth: int = 8,
         num_heads: int = 8,
         layer_dropout: float = 0.0,
-        decoder_depth: int = 6,
+        decoder_depth: int = 6,  # TODO: Make underpowered to prevent collapse
         lr: float = 1e-3,
         weight_decay: float = 0.05,
-        target_scale_interval: Tuple[float, float] = (0.15, 0.2),
-        context_scale: Tuple[float, float] = (0.85, 1.0),
-        num_target_blocks: int = 4,  # number of distinct target blocks per image
+        target_prob_range: Tuple[float, float] = (
+            0.15,
+            0.35,
+        ),  # used to generate the number of distinct target tokens
         m: float = 0.996,  # momentum
         momentum_limits: Tuple[float, float] = (0.996, 1.0),
         **kwargs,
@@ -1096,24 +1097,25 @@ class TJEPA(pl.LightningModule):
         self.lr = lr
         self.weight_decay = weight_decay
         self.m = m  # momentum
-        self.target_scale_interval = target_scale_interval
-        self.context_scale = context_scale
+        self.target_prob_range = target_prob_range
 
         # Optimisation parameters
         self.momentum_limits = momentum_limits
         self.criterion = nn.MSELoss()
 
-        self.tokenizer: BertTokenizer = BertTokenizer.from_pretrained(BERT_MODEL_NAME)
+        self.tokeniser: BertTokenizer = BertTokenizer.from_pretrained(BERT_MODEL_NAME)
+        self.vocab_size = self.tokeniser.vocab_size
+        assert (
+            self.tokeniser.pad_token_id == 0
+        ), f"non-zero pad token id received: {self.tokeniser.pad_token_id=}"
 
-        self.bert_model: BertModel = (
-            BertModel.from_pretrained(BERT_MODEL_NAME)
-            if PRETRAINED_TEXT_ENCODER
-            else BertModel(
-                config=BertConfig()
-            )  # Load the default configuration for BERT (without pre-trained weights)
-        )
-
+        self.embed_dim = embed_dim
+        self.end_depth = enc_depth
+        self.num_heads = num_heads
         self.layer_dropout = layer_dropout
+        self.target_prob_range = target_prob_range
+
+        embedding_layer = nn.Embedding(self.vocab_size, self.embed_dim)
 
         self.encoder = Encoder(
             dim=embed_dim,
@@ -1126,187 +1128,126 @@ class TJEPA(pl.LightningModule):
             self.encoder
         ).cuda()  # copy student encoder
 
-        self.fc = nn.Linear(
-            embed_dim, self.tokenizer.vocab_size
-        )  # Output layer to predict masked tokens
-
         self.predictor = Predictor(
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
             depth=decoder_depth,
+            layer_dropout=self.layer_dropout,
         )
 
-        self.num_target_blocks = num_target_blocks
+        self.pos_embedding = ScaledSinusoidalEmbedding(self.embed_dim)
 
-    # TODO: We don't randomly select the starting token like other JEPAs,
-    # all tokens but the target token are used as the context
-    @staticmethod
-    def randomly_select_starting_token(
-        sequence_length: int,
-        block_length: int,
-        seed: Optional[int] = None,
-    ) -> int:
-        """
-        Randomly selects the starting position of a block within a 1D sequence of tokens.
-
-        Parameters:
-        sequence_length (int): The total number of tokens in the sequence.
-        block_length (int): The number of tokens in the block.
-        seed (Optional[int]): An optional random seed for reproducibility.
-
-        Returns:
-        int: The starting position of the block within the sequence.
-
-        NOTE:
-        - Tokens are the basic units (e.g., words or subwords) of the sequence.
-        - Blocks are contiguous subsequences of tokens within the larger sequence.
-        - This function randomly selects the starting token for a block within the sequence.
-        """
-
-        if seed is not None:
-            torch.manual_seed(seed)  # Set the random seed for reproducibility
-
-        def random_int(limit: int) -> int:
-            return torch.randint(0, limit, (1,)).item()
-
-        max_start_index: int = sequence_length - block_length + 1
-
-        assert (
-            block_length <= sequence_length
-        ), f"Block length ({block_length}) cannot be greater than sequence length ({sequence_length})."
-
-        start_index: int = random_int(max_start_index)
-
-        return start_index
+        self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
+        nn.init.trunc_normal_(self.mask_token, 0.02)
 
     @staticmethod
-    def generate_target_tokens(
-        sequence_length: int,
-        scale: float,  # scale <= 1
-        num_target_blocks: int,
-        seed: Optional[int] = None,
-    ) -> Tuple[List[List[int]], Set[int]]:
-        """
-        Generate target tokens for each 1D block.
-
-        Args:
-            sequence_length (int): The total number of tokens in the sequence.
-            scale (float): Scaling factor for the length of the target block.
-            num_target_blocks (int): Number of target blocks to generate.
-            seed (Optional[int]): An optional random seed for reproducibility.
-
-        Returns:
-            Tuple[List[List[int]], Set[int]]:
-                - target_tokens: A list of lists containing indices of tokens for each target block.
-                - all_tokens: A set of all unique tokens used in target blocks.
-        """
-
-        # Calculate the length of each target block after applying the scale
-        scaled_block_length: int = int(sequence_length * scale)
-
-        assert (
-            scaled_block_length <= sequence_length
-        ), f"Scaled block length ({scaled_block_length}) cannot be greater than sequence length ({sequence_length})."
-
-        # Initialize structures to hold target tokens and all unique tokens
-        target_tokens: List[List[int]] = []
-        all_tokens: Set[int] = set()  # Using a set for fast membership checks
-
-        # For each of the target blocks to generate
-        for _ in range(num_target_blocks):
-            # Randomly select a starting token for the block
-            start_token: int = TJEPA.randomly_select_starting_token(
-                sequence_length=sequence_length,
-                block_length=scaled_block_length,
-                seed=seed,
-            )
-
-            # Initialize list to hold the tokens for the target block
-            tokens: List[int] = []
-            # Collect tokens within the target block
-            for i in range(scaled_block_length):
-                token_position: int = start_token + i
-
-                tokens.append(token_position)
-
-                # Only updated if the position is not already present
-                all_tokens.add(token_position)
-
-            # Store the tokens for the current target block
-            target_tokens.append(tokens)
-
-        return target_tokens, all_tokens
-
-    @staticmethod
-    def generate_context_tokens(
-        sequence_length: int,
-        scale: float,  # scale <= 1
-        target_tokens_to_exclude: Set[int],
-        seed: Optional[int] = None,
+    def generate_target_indices(
+        sequence_batch: torch.Tensor,
+        target_prob_range: Tuple[float, float],
     ) -> List[int]:
         """
-        Generate a list of token indices for the 1D context block, excluding target tokens.
+        Generate target indices for a 1D sequence.
 
         Args:
-            sequence_length (int): The total number of tokens in the sequence.
-            scale (float): Scaling factor for the length of the context block.
-            target_tokens_to_exclude (Set[int]): Set containing indices of target tokens.
-            seed (Optional[int]): An optional random seed for reproducibility.
+            sequence_batch (torch.Tensor): The sequence of tokens to generate target tokens for.
+            target_prob_range (Tuple[float, float]): The range of probabilities of a given token being a target.
 
         Returns:
-            List[int]: A list of token indices for the context block excluding target tokens.
+            List[int]: A list of lists containing indices of target tokens.
         """
-
-        # Calculate the number of tokens in the context block
-        num_tokens_block: int = int(sequence_length * scale)
-
-        # Randomly select the starting token for the context block
-        start_token: int = TJEPA.randomly_select_starting_token(
-            sequence_length=sequence_length,
-            block_length=num_tokens_block,
-            seed=seed,
+        target_prob: float = np.random.uniform(
+            low=target_prob_range[0], high=target_prob_range[1]
         )
 
-        # Generate indices for the context block
-        linear_indices: np.array = np.array(
-            range(start_token, start_token + num_tokens_block)
+        target_indices: List[int] = []
+
+        for sequence in sequence_batch:
+            sequence_length: int = torch.count_nonzero(
+                sequence
+            )  # NOTE: The tokeniser padding token is 0
+
+            num_target_tokens: int = max(int(sequence_length * target_prob), 1)
+            # Randomly select 'num_target_tokens' indices from the sequence
+            indices: torch.Tensor = torch.randperm(sequence_length)[:num_target_tokens]
+            target_indices.append(indices.tolist())
+
+        return target_indices
+
+    @staticmethod
+    def generate_context_indices(
+        sequence_batch: torch.Tensor,
+        target_prob_range: Tuple[float, float],
+    ) -> List[int]:
+        """
+        Generate context tokens for a 1D sequence.
+
+        Args:
+            sequence_batch (torch.Tensor): The sequence of tokens to generate target tokens for.
+            target_prob_range (Tuple[float, float]): The range of probabilities of a given token being a target.
+
+        Returns:
+            List[int]: A list of lists containing indices of context tokens.
+        """
+        context_prob: float = 1 - np.random.uniform(
+            low=target_prob_range[0], high=target_prob_range[1]
         )
 
-        # Exclude target tokens
-        context_tokens: List[int] = np.setdiff1d(
-            linear_indices, np.array(target_tokens_to_exclude), assume_unique=True
-        ).tolist()
+        context_indices: List[int] = []
 
-        return context_tokens
+        for sequence in sequence_batch:
+            sequence_length: int = torch.count_nonzero(
+                sequence
+            )  # NOTE: The tokeniser padding token is 0
 
-    def forward(  # pylint: disable=arguments-differ
+            num_context_tokens: int = max(int(sequence_length * context_prob), 1)
+            # Randomly select 'num_context_tokens' indices from the sequence
+            indices: torch.Tensor = torch.randperm(sequence_length)[:num_context_tokens]
+            context_indices.append(indices.tolist())
+
+        return context_indices
+
+    def forward(
         self,
         x: torch.Tensor,
-        target_scale: float,
-        context_scale: float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        target_patches: List[List[int]]
-        all_unique_target_patches: Set[int]
-        target_patches, all_unique_target_patches = TJEPA.generate_target_patches(
-            sequence_length=x.shape[
-                -1
-            ],  # The number of tokens in the input sequence???
-            scale=target_scale,
-            num_target_blocks=self.num_target_blocks,
+        target_indices: List[int] = TJEPA.generate_target_indices(
+            sequence_batch=x,
+            target_prob_range=self.target_prob_range,
         )
 
-        context_patches: List[int] = TJEPA.generate_context_patches(
-            sequence_length=x.shape[
-                -1
-            ],  # The number of tokens in the input sequence???
-            scale=context_scale,
-            target_patches_to_exclude=all_unique_target_patches,
+        context_indices: List[int] = TJEPA.generate_context_indices(
+            sequence_batch=x,
+            target_prob_range=self.target_prob_range,
         )
 
-        return self.forward_base(
-            x=x,  # (batch_size, seq_length)
-            target_patches=target_patches,
-            context_patches=context_patches,
+        x = self.embedding_layer(x)  # (batch_size, seq_length, embed_dim)
+
+        x = x + self.pos_embedding(x)  # (batch_size, seq_length, embed_dim)
+
+        target_embeddings: torch.Tensor = x[
+            None, target_indices
+        ]  # (batch_size, num_target_tokens, embed_dim)
+        context_embeddings: torch.Tensor = x[
+            None, context_indices
+        ]  # (batch_size, num_context_tokens, embed_dim)
+
+        target_encoding: torch.Tensor = self.teacher_encoder(
+            target_embeddings
+        )  # (batch_size, num_target_tokens, embed_dim)
+        context_encoding: torch.Tensor = self.encoder(
+            context_embeddings
+        )  # (batch_size, num_context_tokens, embed_dim)
+
+        batch_dim, num_patches, _ = target_embeddings.shape
+        target_masks: torch.Tensor = self.mask_token.repeat(batch_dim, num_patches, 1)
+        assert target_masks.shape == target_embeddings.shape
+
+        return (
+            self.predictor(
+                context_encoding=context_encoding,
+                target_masks=target_masks,
+            ),
+            target_encoding,
         )
 
     def update_momentum(self, m: float) -> None:
@@ -1339,3 +1280,40 @@ class TJEPA(pl.LightningModule):
                 teacher_param.data.mul_(other=m).add_(
                     other=student_param.data, alpha=1 - m
                 )
+
+    def training_step(  # pylint: disable=arguments-differ
+        self,
+        batch: torch.Tensor,
+        batch_idx: int,  # pylint: disable=unused-argument
+        dataloader_idx: int = 0,  # pylint: disable=unused-argument
+    ) -> torch.Tensor:
+        """
+        _summary_
+
+        Parameters
+        ----------
+        batch : torch.Tensor
+            _description_
+        batch_idx : int
+            _description_
+
+        Returns
+        -------
+        torch.Tensor
+            _description_
+        """
+
+        (
+            y_student,  # (batch_size, target_block_size, embed_dim)
+            y_teacher,  # (batch_size, target_block_size, embed_dim)
+        ) = self(
+            x=batch  # (batch_size, seq_length)
+        )
+
+        loss: torch.Tensor = self.criterion(y_student, y_teacher)
+        self.log("train_loss", loss)
+
+        return loss
+
+
+# TODO: validation_step, predict_step, on_after_backward, configure_optimizers

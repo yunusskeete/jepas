@@ -70,11 +70,14 @@ class Predictor(nn.Module):
         embed_dim: int,
         num_heads: int,
         depth: int,
+        layer_dropout: float = 0.0,
         predictor_embed_dim: Optional[int] = None,
     ):
         super().__init__()
         # Initialize the transformer-based decoder
-        self.decoder = Decoder(dim=embed_dim, depth=depth, heads=num_heads)
+        self.decoder = Decoder(
+            dim=embed_dim, depth=depth, heads=num_heads, layer_dropout=layer_dropout
+        )
 
         self.predictor_embed = (
             nn.Linear(embed_dim, predictor_embed_dim, bias=True)

@@ -7,6 +7,42 @@ from einops import rearrange
 from utils.types import ensure_tuple
 
 
+class TokenEmbed1D(nn.Module):
+    """
+    Token Embedding
+
+    This module converts token ids into token embeddings.
+
+    Args:
+        num_embeddings (int): Number of tokens in the vocabulary.
+        embed_dim (int): Dimension of the token embedding.
+    """
+
+    def __init__(
+        self,
+        num_embeddings: int,
+        embed_dim: int,
+    ):
+        super().__init__()
+        self.embed = nn.Embedding(
+            num_embeddings=num_embeddings, embedding_dim=embed_dim
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass to convert the input token ids into token embeddings.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, num_token_ids).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_token_ids, embed_dim).
+        """
+        x = self.embed(x)
+
+        return x  # (b, n, e)
+
+
 # Adapted from https://towardsdatascience.com/implementing-visualttransformer-in-pytorch-184f9f16f632
 class PatchEmbed2D(nn.Module):
     """
