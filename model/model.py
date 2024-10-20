@@ -1115,7 +1115,7 @@ class TJEPA(pl.LightningModule):
         self.layer_dropout = layer_dropout
         self.target_prob_range = target_prob_range
 
-        embedding_layer = nn.Embedding(self.vocab_size, self.embed_dim)
+        self.embedding_layer = nn.Embedding(self.vocab_size, self.embed_dim)
 
         self.encoder = Encoder(
             dim=embed_dim,
