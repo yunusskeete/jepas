@@ -7,7 +7,7 @@ from pytorch_lightning.callbacks import (  # ModelCheckpoint,
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from datasets import ImageDataModule
+from jepa_datasets import ImageDataModule
 from model import IJEPA
 
 if __name__ == "__main__":

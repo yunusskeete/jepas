@@ -1,3 +1,10 @@
+"""
+Usage:
+```bash
+python -m jepa_datasets.ijepa_dataset
+```
+"""
+
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 

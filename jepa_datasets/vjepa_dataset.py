@@ -1,7 +1,7 @@
 """
 Usage:
 ```bash
-python -m datasets.vjepa_dataset
+python -m jepa_datasets.vjepa_dataset
 ```
 """
 
@@ -33,9 +33,9 @@ class VideoDataset(Dataset):
             ".mov",
             ".mkv",
         ],
-        frames_per_clip: int = 16,  # TODO: Functionality not working
-        frame_step: int = 4,  # TODO: Functionality not working
-        num_clips: int = 1,  # TODO: Functionality not working
+        frames_per_clip: int = 16,
+        frame_step: int = 4,
+        num_clips: int = 1,
         shuffle: bool = True,
         transform: Optional[transforms.Compose] = None,
         filter_short_videos: bool = False,
@@ -81,18 +81,27 @@ class VideoDataset(Dataset):
         return len(self.video_paths)
 
     def extract_video_clips(self, video: np.array) -> List[np.array]:
-        """Split video into a list of clips"""
-        return [
+        """Split video into a list of clips with consistent frame lengths"""
+        # Calculate the total number of full clips we can extract
+        num_frames: int = video.shape[0]
+        num_full_clips: int = num_frames // self.frames_per_clip
+
+        # Only keep as many full clips as possible
+        full_clips: List[np.array] = [
             video[i * self.frames_per_clip : (i + 1) * self.frames_per_clip]
-            for i in range(self.num_clips)
+            for i in range(num_full_clips)
         ]
+
+        # If you want to limit the number of clips to self.num_clips
+        return full_clips[: self.num_clips]
 
     def __getitem__(self, index: int) -> List[torch.Tensor]:
         video_path: Path = self.video_paths[index]
 
         if os.path.getsize(video_path) > self.filter_long_videos:
             # Retry with a different video if this one is too large/long
-            warnings.warn(f"Skipping large/long video: {video_path.name}")
+            info: str = f"Skipping large/long video: {video_path.name}"
+            warnings.warn(info)
 
             return self.__getitem__(np.random.randint(self.__len__()))
 
@@ -100,18 +109,23 @@ class VideoDataset(Dataset):
 
         if len(batch_frames) == 0:
             # Retry with a different video if this one fails
-            warnings.warn(f"Failed to load batch frames for video: {video_path.name}")
+            info: str = f"Failed to load batch frames for video: {video_path.name=}"
+            warnings.warn(info)
 
             return self.__getitem__(np.random.randint(self.__len__()))
 
-        batch_clips: List[np.array] = (
-            self.extract_video_clips(batch_frames)
-            if self.num_clips > 1
-            else [batch_frames]
-        )
+        # Ensure the video has enough frames for the desired number of clips
+        if len(batch_frames) < self.frames_per_clip * self.num_clips:
+            info: str = f"Skipping short video: {video_path.name=}"
+            warnings.warn(info)
 
-        # TODO: Check type - List[np.array] or List[torch.Tensor]
-        batch_clips: List[np.array] = [self.transform(clip) for clip in batch_clips]
+            return self.__getitem__(np.random.randint(self.__len__()))
+
+        # Extract clips
+        batch_clips: List[np.array] = self.extract_video_clips(batch_frames)
+
+        # Apply the transformation to each clip
+        batch_clips: List[torch.Tensor] = [self.transform(clip) for clip in batch_clips]
 
         return batch_clips
 
@@ -122,9 +136,8 @@ class VideoDataset(Dataset):
             clip_len: int = self.frames_per_clip * self.frame_step
 
             if self.filter_short_videos and len(vr) < clip_len:
-                warnings.warn(
-                    f"Skipping short video: {video_path.name}"
-                )  # TODO: Change to info log
+                info: str = f"Skipping short video: {video_path.name=}"
+                warnings.warn(info)  # TODO: Change to info log
 
                 return np.array([])
 
@@ -137,14 +150,13 @@ class VideoDataset(Dataset):
             # Generate indices within the allowed frame range
             indices: np.array = np.arange(0, min(max_frames, len(vr)), self.frame_step)
 
-            batch: np.array = vr.get_batch(
-                indices
-            ).asnumpy()  # TODO: Check if .asnumpy() is necessary
+            batch: np.array = vr.get_batch(indices).asnumpy()
 
             return batch
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            warnings.warn(f"Error loading video: {e}")
+            info: str = f"Error loading video: {e=}"
+            warnings.warn(info)
 
             return np.array([])
 
@@ -216,6 +228,14 @@ class VideoDataModule(pl.LightningDataModule):
             shuffle=self.shuffle,
         )
 
+    def video_collate_fn(self, batch):
+        # Ensures all clips in the batch are of the same size
+        batch = [torch.stack(clip) for clip in batch]  # Stack clips into tensors
+        batch = torch.nn.utils.rnn.pad_sequence(
+            batch, batch_first=True
+        )  # Pads sequences
+        return batch
+
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
@@ -225,6 +245,7 @@ class VideoDataModule(pl.LightningDataModule):
             persistent_workers=self.persistent_workers,
             prefetch_factor=self.prefetch_factor,
             shuffle=False,
+            # collate_fn=self.video_collate_fn,
         )
 
     def val_dataloader(self):
@@ -236,6 +257,7 @@ class VideoDataModule(pl.LightningDataModule):
             persistent_workers=self.persistent_workers,
             prefetch_factor=self.prefetch_factor,
             shuffle=False,
+            # collate_fn=self.video_collate_fn,
         )
 
     def test_dataloader(self):
@@ -247,6 +269,7 @@ class VideoDataModule(pl.LightningDataModule):
             persistent_workers=self.persistent_workers,
             prefetch_factor=self.prefetch_factor,
             shuffle=False,
+            # collate_fn=self.video_collate_fn,
         )
 
 

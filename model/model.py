@@ -896,7 +896,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
     def training_step(  # pylint: disable=arguments-differ
         self,
-        batch: List[torch.Tensor],
+        batch: List[torch.Tensor],  # clips
         batch_idx: int,  # pylint: disable=unused-argument
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
@@ -918,6 +918,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         # Initialize the running loss to zero
         running_loss: torch.Tensor = torch.tensor(0.0, device=self.device)
 
+        clip: torch.Tensor
         for clip in batch:
             # Generate random target and context aspect ratio and scale
             target_aspect_ratio: float = np.random.uniform(
@@ -935,7 +936,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
                 y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
                 y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
             ) = self(
-                x=batch,  # (batch_size, time, channels, img_height, img_width)
+                x=clip,  # (batch_size, time, channels, img_height, img_width)
                 target_aspect_ratio=target_aspect_ratio,
                 target_scale=target_scale,
                 context_aspect_ratio=self.context_aspect_ratio,
@@ -962,19 +963,19 @@ class VJEPA(JEPA_base, pl.LightningModule):
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
         """
-        _summary_
+        Perform a validation step for each video clip (tensor) in the batch of clips (list of tensors).
 
         Parameters
         ----------
         batch : torch.Tensor
-            _description_
+            A tensor representing the batch of data (video clips).
         batch_idx : int
-            _description_
+            Index of the batch in the current epoch.
 
         Returns
         -------
         torch.Tensor
-            _description_
+            The aggregated loss for the batch.
         """
         # Generate random target and context aspect ratio and scale
         target_aspect_ratio: float = np.random.uniform(
@@ -1288,21 +1289,22 @@ class TJEPA(pl.LightningModule):
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
         """
-        _summary_
+        Perform training step for batch of text sequences.
 
         Parameters
         ----------
-        batch : torch.Tensor
-            _description_
-        batch_idx : int
-            _description_
+        batch: torch.Tensor
+            Batch of text sequences to train on.
+        batch_idx: int
+            Index of the batch.
+        dataloader_idx: int
+            Index of the dataloader.
 
         Returns
         -------
         torch.Tensor
-            _description_
+            Training loss.
         """
-
         (
             y_student,  # (batch_size, target_block_size, embed_dim)
             y_teacher,  # (batch_size, target_block_size, embed_dim)

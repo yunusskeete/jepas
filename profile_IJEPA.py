@@ -5,7 +5,7 @@ import torch
 import torch.profiler
 from torch.utils.data import DataLoader
 
-from datasets import ImageDataset
+from jepa_datasets import ImageDataset
 from model import IJEPA
 
 if __name__ == "__main__":

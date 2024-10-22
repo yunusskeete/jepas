@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import (  # ModelCheckpoint,
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from datasets import VideoDataModule
+from jepa_datasets import VideoDataModule
 from model import VJEPA
 
 if __name__ == "__main__":
