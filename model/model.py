@@ -5,7 +5,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from transformers import BertConfig, BertModel, BertTokenizer
+from transformers import BertTokenizer
 from x_transformers import Encoder
 from x_transformers.x_transformers import ScaledSinusoidalEmbedding
 
@@ -1144,23 +1144,25 @@ class TJEPA(pl.LightningModule):
     @staticmethod
     def generate_target_indices(
         sequence_batch: torch.Tensor,
+        # attention_masks: torch.Tensor,
         target_prob_range: Tuple[float, float],
-    ) -> List[int]:
+    ) -> List[List[int]]:
         """
         Generate target indices for a 1D sequence.
 
         Args:
             sequence_batch (torch.Tensor): The sequence of tokens to generate target tokens for.
+            attention_masks (torch.Tensor): The attention masks corresponding to the sequence batch.
             target_prob_range (Tuple[float, float]): The range of probabilities of a given token being a target.
 
         Returns:
-            List[int]: A list of lists containing indices of target tokens.
+            List[List[int]]: A list of lists containing indices of target tokens.
         """
         target_prob: float = np.random.uniform(
             low=target_prob_range[0], high=target_prob_range[1]
         )
 
-        target_indices: List[int] = []
+        target_indices: List[List[int]] = []
 
         for sequence in sequence_batch:
             sequence_length: int = torch.count_nonzero(
@@ -1177,23 +1179,25 @@ class TJEPA(pl.LightningModule):
     @staticmethod
     def generate_context_indices(
         sequence_batch: torch.Tensor,
+        # attention_masks: torch.Tensor,
         target_prob_range: Tuple[float, float],
-    ) -> List[int]:
+    ) -> List[List[int]]:
         """
         Generate context tokens for a 1D sequence.
 
         Args:
             sequence_batch (torch.Tensor): The sequence of tokens to generate target tokens for.
+            attention_masks (torch.Tensor): The attention masks corresponding to the sequence batch.
             target_prob_range (Tuple[float, float]): The range of probabilities of a given token being a target.
 
         Returns:
-            List[int]: A list of lists containing indices of context tokens.
+            List[List[int]]: A list of lists containing indices of context tokens.
         """
         context_prob: float = 1 - np.random.uniform(
             low=target_prob_range[0], high=target_prob_range[1]
         )
 
-        context_indices: List[int] = []
+        context_indices: List[List[int]] = []
 
         for sequence in sequence_batch:
             sequence_length: int = torch.count_nonzero(
@@ -1210,14 +1214,17 @@ class TJEPA(pl.LightningModule):
     def forward(
         self,
         x: torch.Tensor,
+        # attention_masks: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         target_indices: List[int] = TJEPA.generate_target_indices(
             sequence_batch=x,
+            # attention_masks=attention_masks,
             target_prob_range=self.target_prob_range,
         )
 
         context_indices: List[int] = TJEPA.generate_context_indices(
             sequence_batch=x,
+            # attention_masks=attention_masks,
             target_prob_range=self.target_prob_range,
         )
 
@@ -1284,7 +1291,7 @@ class TJEPA(pl.LightningModule):
 
     def training_step(  # pylint: disable=arguments-differ
         self,
-        batch: torch.Tensor,
+        batch: Tuple[torch.Tensor, torch.Tensor],
         batch_idx: int,  # pylint: disable=unused-argument
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
@@ -1294,7 +1301,7 @@ class TJEPA(pl.LightningModule):
         Parameters
         ----------
         batch: torch.Tensor
-            Batch of text sequences to train on.
+            Batch of text sequences and attention masks to train on.
         batch_idx: int
             Index of the batch.
         dataloader_idx: int
@@ -1309,7 +1316,8 @@ class TJEPA(pl.LightningModule):
             y_student,  # (batch_size, target_block_size, embed_dim)
             y_teacher,  # (batch_size, target_block_size, embed_dim)
         ) = self(
-            x=batch  # (batch_size, seq_length)
+            x=batch[0],  # (batch_size, seq_length)
+            # attention_masks=batch[1],  # (batch_size, seq_length)
         )
 
         loss: torch.Tensor = self.criterion(y_student, y_teacher)

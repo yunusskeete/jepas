@@ -5,7 +5,6 @@ python -m jepa_datasets.tjepa_dataset
 ```
 """
 
-from pathlib import Path
 from typing import Optional, Tuple
 
 import datasets
@@ -161,9 +160,39 @@ if __name__ == "__main__":
     test_dataloader: DataLoader = dataset.test_dataloader()
 
     # Example of iterating through the test data
-    for sample in full_tjepa_loader:
+    for sample in test_dataloader:
         print(f"{len(sample)=}")  # Should print 2 (token_ids, attention_mask)
         print(
             f"{sample[0].shape=}"
         )  # Should print torch.Size([batch_size, max_length])
+        print(f"{sample[0][2:6]=}")
+        print(f"{sample[1][2:6]=}")
+
         break
+
+    # # longest_sample: int = 0
+    # # for idx, sample in enumerate(hf_dataset):
+    # #     # longest_sample = max(longest_sample, len(sample["text"]))
+
+    # #     # if idx % 1_000_000 == 0:
+    # #     #     print(f"{longest_sample=:,}")
+    # #     #     print(f"{idx=:,}")
+    # #     if len(sample["text"]) == 100_000:
+    # #         print(f"{idx=:,}")
+
+    # #         break
+
+    # sample: str = hf_dataset[1606]["text"]
+    # print(f"{len(sample)=}")
+    # encoding = tokeniser(
+    #     sample,
+    #     return_tensors="pt",
+    #     padding="max_length",
+    #     truncation=True,
+    #     max_length=10_000,
+    # )
+    # ids, mask = encoding["input_ids"].squeeze(), encoding["attention_mask"].squeeze()
+    # print(f"{ids=}")
+    # print(f"{mask=}")
+
+    # # print(f"{longest_sample=:,}")
