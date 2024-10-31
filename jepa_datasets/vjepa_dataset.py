@@ -284,6 +284,7 @@ if __name__ == "__main__":
 
     # Example of iterating through the test data
     for video_clips in test_vjepa_loader:
+        print(f"{type(video_clips)=}")
         print(f"{len(video_clips)=}")  # Should print 1
         print(
             f"{video_clips[0].shape=}"
@@ -299,6 +300,7 @@ if __name__ == "__main__":
 
     # Example of iterating through the test data
     for video_clips in test_dataloader:
+        print(f"{type(video_clips)=}")
         print(f"{len(video_clips)=}")  # Should print 1
         print(
             f"{video_clips[0].shape=}"

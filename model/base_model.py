@@ -214,13 +214,18 @@ class JEPA_base(VisionTransformer):
         """
         test_mode: bool = self.mode == "test"
         """
-        Skip (student) encoder (`patch_embed_only=True`) during training
-        as patch embeddings are jointly encoded by the student and the teacher
-        encoder such that the student can learn to predict the teacher
-
-        NOTE: Positional encoding applied to `x` during `self.forward_vit()`
+        NOTE: `self.forward_vit()` patch embeds AND OPTIONALLY encodes embeddings using
+        the student encoder.
+        
+        During training mode, Joint Embedding (with student and teacher encoder) occurs,
+        thus, `self.forward_vit()` need only patch embed - target and context blocks will
+        be extracted and encoded using the teacher and student encoders respectively.
         """
-        x: torch.Tensor = self.forward_vit(x=x, patch_embed_only=not test_mode)
+        # NOTE: Positional encoding applied to `x` during `self.forward_vit()`
+        x: torch.Tensor = self.forward_vit(
+            x=x,
+            patch_embed_only=not test_mode,
+        )
         batch_size, num_patches, embed_dim = (  # pylint: disable=unused-variable
             x.shape
         )  # where num_patches = (output_height * output_width) if not self.is_video else (output_t * output_height * output_width)
@@ -228,9 +233,6 @@ class JEPA_base(VisionTransformer):
         # If in test mode, return the full embedding using the student encoder
         if test_mode:
             return x  # (batch_size, num_patches, embed_dim)
-
-        # If not in test mode, generate target/context blocks, embed those using the student/teacher encoders,
-        # and set up JEP (Joint Embedding Prediction) optimisation incentive
 
         ### Get target embeddings using the target encoder
         target_blocks: torch.Tensor = (

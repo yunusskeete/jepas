@@ -1,5 +1,5 @@
 import copy
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Literal, Optional, Set, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -414,19 +414,19 @@ class IJEPA(JEPA_base, pl.LightningModule):
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
         """
-        _summary_
+        Perform a validation step for each image (tensor) in the batch of images (list of tensors).
 
         Parameters
         ----------
         batch : torch.Tensor
-            _description_
+            A tensor representing the batch of data (images).
         batch_idx : int
-            _description_
+            Index of the batch in the current epoch.
 
         Returns
         -------
         torch.Tensor
-            _description_
+            The aggregated loss for the batch.
         """
         # Generate random target and context aspect ratio and scale
         target_aspect_ratio: float = np.random.uniform(
@@ -958,7 +958,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
     def validation_step(  # pylint: disable=arguments-differ
         self,
-        batch: torch.Tensor,
+        batch: List[torch.Tensor],  # clips
         batch_idx: int,  # pylint: disable=unused-argument
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
@@ -967,8 +967,9 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
         Parameters
         ----------
-        batch : torch.Tensor
-            A tensor representing the batch of data (video clips).
+        ----------
+        batch : List[torch.Tensor]
+            A list of tensors representing the batch of data (video clips).
         batch_idx : int
             Index of the batch in the current epoch.
 
@@ -977,33 +978,46 @@ class VJEPA(JEPA_base, pl.LightningModule):
         torch.Tensor
             The aggregated loss for the batch.
         """
-        # Generate random target and context aspect ratio and scale
-        target_aspect_ratio: float = np.random.uniform(
-            self.target_aspect_ratio[0], self.target_aspect_ratio[1]
-        )
-        target_scale: float = np.random.uniform(
-            low=self.target_scale_interval[0], high=self.target_scale_interval[1]
-        )
+        # Initialize the running loss to zero
+        running_loss: torch.Tensor = torch.tensor(0.0, device=self.device)
 
-        context_scale: float = np.random.uniform(
-            self.context_scale[0], self.context_scale[1]
-        )
+        clip: torch.Tensor
+        for clip in batch:
+            # Generate random target and context aspect ratio and scale
+            target_aspect_ratio: float = np.random.uniform(
+                self.target_aspect_ratio[0], self.target_aspect_ratio[1]
+            )
+            target_scale: float = np.random.uniform(
+                low=self.target_scale_interval[0], high=self.target_scale_interval[1]
+            )
 
-        (
-            y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-            y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-        ) = self(
-            x=batch,
-            target_aspect_ratio=target_aspect_ratio,
-            target_scale=target_scale,
-            context_aspect_ratio=self.context_aspect_ratio,
-            context_scale=context_scale,
-        )
+            context_scale: float = np.random.uniform(
+                self.context_scale[0], self.context_scale[1]
+            )
 
-        loss: torch.Tensor = self.criterion(y_student, y_teacher)
-        self.log("val_loss", loss)
+            (
+                y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+                y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+            ) = self(
+                x=batch,
+                target_aspect_ratio=target_aspect_ratio,
+                target_scale=target_scale,
+                context_aspect_ratio=self.context_aspect_ratio,
+                context_scale=context_scale,
+            )
 
-        return loss
+            # Compute the loss for the current clip
+            loss: torch.Tensor = self.criterion(y_student, y_teacher)
+
+            # Accumulate the loss
+            running_loss += loss
+
+        # Normalize the running loss by the batch size
+        running_loss /= len(batch)
+
+        self.log("val_loss", running_loss)
+
+        return running_loss
 
     def predict_step(  # pylint: disable=arguments-differ
         self,
@@ -1017,16 +1031,16 @@ class VJEPA(JEPA_base, pl.LightningModule):
         Parameters
         ----------
         batch : torch.Tensor
-            _description_
+            A tensor representing the batch of data (video clip).
         batch_idx : int
-            _description_
+            Index of the batch.
         dataloader_idx : int
-            _description_
+            Index of the dataloader.
 
         Returns
         -------
         torch.Tensor
-            _description_
+            The student embedding of the video clip.
         """
         # Generate random target and context aspect ratio
         target_aspect_ratio: float = np.random.uniform(
@@ -1089,10 +1103,12 @@ class TJEPA(pl.LightningModule):
         ),  # used to generate the number of distinct target tokens
         m: float = 0.996,  # momentum
         momentum_limits: Tuple[float, float] = (0.996, 1.0),
+        mode: Literal["test", "train"] = "train",
         **kwargs,
     ):
         pl.LightningModule.__init__(self)
         self.save_hyperparameters()
+        self.mode = mode.lower()
 
         # Define hyperparameters
         self.lr = lr
@@ -1213,24 +1229,24 @@ class TJEPA(pl.LightningModule):
 
     def forward(
         self,
-        x: torch.Tensor,
+        x: torch.Tensor,  # (batch_size, seq_length)
         # attention_masks: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         target_indices: List[int] = TJEPA.generate_target_indices(
-            sequence_batch=x,
-            # attention_masks=attention_masks,
+            sequence_batch=x,  # (batch_size, seq_length)
             target_prob_range=self.target_prob_range,
         )
-
         context_indices: List[int] = TJEPA.generate_context_indices(
-            sequence_batch=x,
-            # attention_masks=attention_masks,
+            sequence_batch=x,  # (batch_size, seq_length)
             target_prob_range=self.target_prob_range,
         )
 
         x = self.embedding_layer(x)  # (batch_size, seq_length, embed_dim)
 
         x = x + self.pos_embedding(x)  # (batch_size, seq_length, embed_dim)
+
+        if self.mode == "test":
+            return self.encoder(x)  # (batch_size, seq_length, embed_dim)
 
         target_embeddings: torch.Tensor = x[
             None, target_indices
@@ -1246,8 +1262,8 @@ class TJEPA(pl.LightningModule):
             context_embeddings
         )  # (batch_size, num_context_tokens, embed_dim)
 
-        batch_dim, num_patches, _ = target_embeddings.shape
-        target_masks: torch.Tensor = self.mask_token.repeat(batch_dim, num_patches, 1)
+        batch_dim, num_tokens, _ = target_embeddings.shape
+        target_masks: torch.Tensor = self.mask_token.repeat(batch_dim, num_tokens, 1)
         assert target_masks.shape == target_embeddings.shape
 
         return (
@@ -1312,12 +1328,13 @@ class TJEPA(pl.LightningModule):
         torch.Tensor
             Training loss.
         """
+        x, attention_masks = batch
         (
             y_student,  # (batch_size, target_block_size, embed_dim)
             y_teacher,  # (batch_size, target_block_size, embed_dim)
         ) = self(
-            x=batch[0],  # (batch_size, seq_length)
-            # attention_masks=batch[1],  # (batch_size, seq_length)
+            x=x,  # (batch_size, seq_length)
+            # attention_masks=attention_masks,  # (batch_size, seq_length)
         )
 
         loss: torch.Tensor = self.criterion(y_student, y_teacher)
@@ -1325,5 +1342,79 @@ class TJEPA(pl.LightningModule):
 
         return loss
 
+    def validation_step(  # pylint: disable=arguments-differ
+        self,
+        batch: Tuple[torch.Tensor, torch.Tensor],
+        batch_idx: int,  # pylint: disable=unused-argument
+        dataloader_idx: int = 0,  # pylint: disable=unused-argument
+    ) -> torch.Tensor:
+        """
+        Perform validation step for batch of text sequences.
 
-# TODO: validation_step, predict_step, on_after_backward, configure_optimizers
+        Parameters
+        ----------
+        batch: torch.Tensor
+            Batch of text sequences and attention masks to train on.
+        batch_idx: int
+            Index of the batch.
+        dataloader_idx: int
+            Index of the dataloader.
+
+        Returns
+        -------
+        torch.Tensor
+            The student embedding of the input sequence.
+        """
+        x, attention_masks = batch
+        (
+            y_student,  # (batch_size, target_block_size, embed_dim)
+            y_teacher,  # (batch_size, target_block_size, embed_dim)
+        ) = self(
+            x=x,  # (batch_size, seq_length)
+            # attention_masks=attention_masks,  # (batch_size, seq_length)
+        )  # (batch_size, seq_length, embed_dim)
+
+        loss: torch.Tensor = self.criterion(y_student, y_teacher)
+        self.log("val_loss", loss)
+
+        return loss
+
+    def predict_step(  # pylint: disable=arguments-differ
+        self,
+        batch: Tuple[torch.Tensor, torch.Tensor],
+        batch_idx: int,  # pylint: disable=unused-argument
+        dataloader_idx: int = 0,  # pylint: disable=unused-argument
+    ) -> torch.Tensor:
+        self.mode = "test"
+
+        x, attention_masks = batch
+        return self(
+            x=x,  # (batch_size, seq_length)
+            # attention_masks=attention_masks,  # (batch_size, seq_length)
+        )  # (batch_size, seq_length, embed_dim)
+
+    def on_after_backward(self) -> None:
+        self.update_momentum(self.m)
+        self.m += (
+            self.momentum_limits[1] - self.momentum_limits[0]
+        ) / self.trainer.estimated_stepping_batches
+
+    def configure_optimizers(
+        self,
+    ) -> Dict[str, Union[Callable, Dict[str, Union[str, Callable]]]]:
+        optimizer: Callable = torch.optim.AdamW(
+            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        )
+        scheduler: Callable = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=self.lr,
+            total_steps=self.trainer.estimated_stepping_batches,
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+            },
+        }
