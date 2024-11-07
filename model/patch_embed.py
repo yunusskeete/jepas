@@ -165,7 +165,9 @@ class PatchEmbed3D(nn.Module):
         """
         # Apply the convolutional layer to get patches
         x = self.conv(x)
+
+        batch_size, embed_dim, t, h, w = x.shape
         # Flatten the patches into a sequence
         x = rearrange(x, "b e t h w -> b (t h w) e")
 
-        return x  # (b n e)
+        return x, batch_size, embed_dim, t, h, w  # (b n e)

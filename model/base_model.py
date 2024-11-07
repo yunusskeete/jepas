@@ -18,11 +18,13 @@ class JEPA_base(VisionTransformer):
         decoder_depth: int,
         num_target_blocks: int = 4,
         mode: Literal["test", "train"] = "train",
+        static_scene_temporal_reasoning: bool = False,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
         self.num_target_blocks = num_target_blocks
         self.mode = mode.lower()
+        self.static_scene_temporal_reasoning = static_scene_temporal_reasoning
 
         self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
         nn.init.trunc_normal_(self.mask_token, 0.02)
@@ -220,7 +222,12 @@ class JEPA_base(VisionTransformer):
 
         NOTE: Positional encoding applied to `x` during `self.forward_vit()`
         """
-        x: torch.Tensor = self.forward_vit(x=x, patch_embed_only=not test_mode)
+        output = self.forward_vit(x=x, attention_mask=None, patch_embed_only=test_mode)
+        if self.static_scene_temporal_reasoning:
+            x, x_stacked = output
+        else:
+            x, x_stacked = output, None
+
         batch_size, num_patches, embed_dim = (  # pylint: disable=unused-variable
             x.shape
         )  # where num_patches = (output_height * output_width) if not self.is_video else (output_t * output_height * output_width)
@@ -246,7 +253,7 @@ class JEPA_base(VisionTransformer):
         ### Get context embeddings excluding the target patches
         context_block: torch.Tensor = (
             self.get_context_block(  # NOTE: `context_block` contains positional information from `x`, which underwent the `self.forward_vit()` pass
-                x=x,
+                x=x_stacked if self.static_scene_temporal_reasoning else x,
                 context_patches=context_patches,
             )
         )

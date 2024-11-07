@@ -539,6 +539,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         momentum_limits: Tuple[float, float] = (0.996, 1.0),
         num_frames: int = 16,
         testing_purposes_only: bool = False,
+        static_scene_temporal_reasoning: bool = False,
         **kwargs,
     ):
         pl.LightningModule.__init__(self)
@@ -547,6 +548,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
             decoder_depth=decoder_depth,
             num_target_blocks=num_target_blocks,
             num_frames=num_frames,
+            static_scene_temporal_reasoning=static_scene_temporal_reasoning,
             **kwargs,
         )
         if not testing_purposes_only:
