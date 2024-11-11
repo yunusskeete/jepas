@@ -18,13 +18,11 @@ class JEPA_base(VisionTransformer):
         decoder_depth: int,
         num_target_blocks: int = 4,
         mode: Literal["test", "train"] = "train",
-        static_scene_temporal_reasoning: bool = False,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
         self.num_target_blocks = num_target_blocks
         self.mode = mode.lower()
-        self.static_scene_temporal_reasoning = static_scene_temporal_reasoning
 
         self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
         nn.init.trunc_normal_(self.mask_token, 0.02)
@@ -194,6 +192,8 @@ class JEPA_base(VisionTransformer):
         x: torch.Tensor,
         target_patches: List[List[int]],
         context_patches: List[int],
+        static_scene_temporal_reasoning: bool = False,
+        use_static_positional_embedding: bool = False,
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         """
         (Image/video invariant)
@@ -222,8 +222,14 @@ class JEPA_base(VisionTransformer):
 
         NOTE: Positional encoding applied to `x` during `self.forward_vit()`
         """
-        output = self.forward_vit(x=x, attention_mask=None, patch_embed_only=test_mode)
-        if self.static_scene_temporal_reasoning:
+        output = self.forward_vit(
+            x=x,
+            attention_mask=None,
+            patch_embed_only=test_mode,
+            static_scene_temporal_reasoning=static_scene_temporal_reasoning,
+            use_static_positional_embedding=use_static_positional_embedding,
+        )
+        if static_scene_temporal_reasoning:
             x, x_stacked = output
         else:
             x, x_stacked = output, None
@@ -253,7 +259,7 @@ class JEPA_base(VisionTransformer):
         ### Get context embeddings excluding the target patches
         context_block: torch.Tensor = (
             self.get_context_block(  # NOTE: `context_block` contains positional information from `x`, which underwent the `self.forward_vit()` pass
-                x=x_stacked if self.static_scene_temporal_reasoning else x,
+                x=x_stacked if static_scene_temporal_reasoning else x,
                 context_patches=context_patches,
             )
         )
@@ -290,6 +296,9 @@ class JEPA_base(VisionTransformer):
         return (
             prediction_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
             target_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+            context_block,
+            target_patches,
+            context_patches,
         )
 
     @staticmethod

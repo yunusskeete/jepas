@@ -12,27 +12,20 @@ from jepa_datasets import VideoDataModule
 from model import VJEPA
 
 if __name__ == "__main__":
-    import torch
-
-    torch.set_float32_matmul_precision("medium")
 
     dataset_path: Path = Path(
         "E:/ahmad/kinetics-dataset/smaller"
     ).resolve()  # Path to Kinetics dataset
 
-    dataset = VideoDataModule(
+    dataset_videos = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=4,
+        batch_size=1,
         frames_per_clip=8,
         pin_memory=True,
-        prefetch_factor=4,
+        prefetch_factor=2,
     )
 
-    model = VJEPA(
-        lr=1e-3,
-        num_frames=dataset.frames_per_clip,
-        static_scene_temporal_reasoning=True,
-    )
+    model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
@@ -43,7 +36,15 @@ if __name__ == "__main__":
         name="v-jepa",
     )
 
-    trainer = pl.Trainer(
+    # Path to the checkpoint to resume from (use the latest checkpoint if available)
+    checkpoint_path: Optional[str] = (
+        # "D:/MDX/Thesis/lightning_logs/v-jepa/version_13/checkpoints/epoch=0-step=750.ckpt"
+        None
+    )
+
+    print("STARTING IMAGES")
+
+    trainer_images = pl.Trainer(
         accelerator="gpu",
         devices=1,
         # precision="16-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
@@ -53,17 +54,49 @@ if __name__ == "__main__":
         logger=logger,
     )
 
-    # Path to the checkpoint to resume from (use the latest checkpoint if available)
-    checkpoint_path: Optional[str] = (
-        # "D:/MDX/Thesis/lightning_logs/v-jepa/version_13/checkpoints/epoch=0-step=750.ckpt"
-        None
+    model.mode = "images"
+
+    trainer_images.fit(
+        model,
+        dataset_videos,
+        ckpt_path=checkpoint_path,
     )
 
-    trainer.fit(model, dataset, ckpt_path=checkpoint_path)
+    print("STARTING VIDEOS")
 
-    checkpoint_path: Optional[str] = (
-        "D:/MDX/Thesis/lightning_logs/v-jepa/version_16/checkpoints/epoch=0-step=750.ckpt"
-        # None
+    trainer_videos = pl.Trainer(
+        accelerator="gpu",
+        devices=1,
+        # precision="16-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
+        max_epochs=1,
+        gradient_clip_val=0.1,
+        callbacks=[lr_monitor, model_summary],
+        logger=logger,
+    )
+    model.mode = "videos"
+
+    trainer_videos.fit(
+        model,
+        dataset_videos,
+        ckpt_path=checkpoint_path,
     )
 
-    trainer.validate(model, dataset, ckpt_path=checkpoint_path)
+    print("STARTING STATIC SCENES")
+
+    trainer_static = pl.Trainer(
+        accelerator="gpu",
+        devices=1,
+        # precision="16-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
+        max_epochs=1,
+        gradient_clip_val=0.1,
+        callbacks=[lr_monitor, model_summary],
+        logger=logger,
+    )
+
+    model.mode = "static_scene"
+
+    trainer_static.fit(
+        model,
+        dataset_videos,
+        ckpt_path=checkpoint_path,
+    )

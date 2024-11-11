@@ -24,7 +24,6 @@ class VisionTransformer(nn.Module):
         post_emb_norm: bool = True,
         post_enc_norm: bool = True,
         layer_dropout: float = 0.0,
-        static_scene_temporal_reasoning: bool = False,
         **kwargs: Any,
     ):
         super().__init__()
@@ -37,7 +36,6 @@ class VisionTransformer(nn.Module):
 
         self.embed_dim = embed_dim
         self.num_heads = num_heads
-        self.static_scene_temporal_reasoning = static_scene_temporal_reasoning
 
         self.patch_embed: nn.Module = (
             PatchEmbed2D(
@@ -61,6 +59,7 @@ class VisionTransformer(nn.Module):
         )
 
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches, embed_dim))
+        print(f"{self.pos_embedding.shape=}")
         self.stacked_pos_embedding = None
 
         self.post_emb_norm = post_emb_norm
@@ -158,6 +157,8 @@ class VisionTransformer(nn.Module):
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         patch_embed_only: bool = False,
+        static_scene_temporal_reasoning: bool = False,
+        use_static_positional_embedding: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         if isinstance(x, list):
@@ -165,7 +166,7 @@ class VisionTransformer(nn.Module):
         # Obtain patch embeddings from the input tensor
         x_embed, _, _, t, h, w = self.patch_embed(x)  # (batch, num_patches, embed_dim)
 
-        if self.static_scene_temporal_reasoning:
+        if static_scene_temporal_reasoning:
             _, _, original_t, _, _ = x.shape
             random_t = torch.randint(0, original_t, (1,)).item()
             random_pos_embedding_t = random_t // self.tubelet_size
@@ -183,8 +184,12 @@ class VisionTransformer(nn.Module):
             x_stacked = self.encoder(x_stacked, attn_mask=attention_mask)
             x_stacked = self.post_enc_norm_vit(x_stacked)
 
-        # Add positional embeddings to the patch embeddings
-        x_embed = x_embed + self.pos_embedding  # (batch, num_patches, embed_dim)
+        if use_static_positional_embedding:
+            self.pseudo_3d_pos_embedding(conv_t=t, conv_h=h, conv_w=w, random_t=0)
+            x_embed = x_embed + self.stacked_pos_embedding
+        else:
+            # Add positional embeddings to the patch embeddings
+            x_embed = x_embed + self.pos_embedding  # (batch, num_patches, embed_dim)
 
         # Normalize the patch embeddings (if `self.post_emb_norm`)
         x_embed = self.post_emb_norm_vit(x_embed)  # (batch, num_patches, embed_dim)
@@ -200,7 +205,7 @@ class VisionTransformer(nn.Module):
         # Normalize the encoded patches (if `self.post_enc_norm`)
         x_embed = self.post_enc_norm_vit(x_embed)  # (batch, num_patches, embed_dim)
 
-        if self.static_scene_temporal_reasoning:
+        if static_scene_temporal_reasoning:
             return x_embed, x_stacked
         else:
             return x_embed
