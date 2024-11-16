@@ -11,3 +11,4 @@ JEPA.drawio
 .$JEPA.drawio.bkp
 *.ipynb
 !t.ipynb
+finetune/*

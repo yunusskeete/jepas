@@ -5,11 +5,15 @@ from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 import cv2
 from einops import rearrange
 import numpy as np
+from PIL import Image
 
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms
+from pytorch_lightning.loggers import TensorBoardLogger
+
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
@@ -18,7 +22,16 @@ from pytorch_lightning.callbacks import (
 )
 
 from utils.types import Number
-from pretrain_VJEPA import VJEPA
+from pretrain_VJEPA_static_scene import VJEPA
+
+
+class LambdaLayer(nn.Module):
+    def __init__(self, func):
+        super(LambdaLayer, self).__init__()
+        self.func = func
+
+    def forward(self, x):
+        return self.func(x)
 
 
 class VJEPADataset(Dataset):
@@ -52,20 +65,51 @@ class VJEPADataset(Dataset):
         cap = cv2.VideoCapture(video_path)
         frames = []
 
-        # Extract frames from the video
-        while len(frames) < self.num_frames:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
-            if self.transform:
-                frame = self.transform(frame)
-            frames.append(frame)
+        try:
+            # Extract frames from the video
+            while len(frames) < self.num_frames:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
+                if self.transform:
+                    frame = self.transform(frame)
+                frames.append(frame)
+        except Exception as e:
+            print(f"Error processing video {video_path}: {e}")
+            cap.release()
+            single_frame: torch.Tensor = (
+                torch.arange(start=0, end=3 * 224 * 224, step=1)
+                .reshape(3, 224, 224)
+                .float()
+            )
+            video_tensor: torch.Tensor = (
+                torch.arange(start=0, end=3 * 8 * 224 * 224, step=1)
+                .reshape(3, 8, 224, 224)
+                .float()
+            )
+            return (
+                single_frame.unsqueeze(1),
+                video_tensor,
+            )  # Return None or you can choose to return a default value
 
         cap.release()
 
+        if len(frames) <= 0:
+            single_frame: torch.Tensor = (
+                torch.arange(start=0, end=3 * 224 * 224, step=1)
+                .reshape(3, 224, 224)
+                .float()
+            )
+            video_tensor: torch.Tensor = (
+                torch.arange(start=0, end=3 * 8 * 224 * 224, step=1)
+                .reshape(3, 8, 224, 224)
+                .float()
+            )
+            return single_frame.unsqueeze(1), video_tensor
+
         # Ensure we have enough frames; pad with the last frame if necessary
-        while len(frames) < self.num_frames:
+        while len(frames) < self.num_frames and len(frames) > 0:
             frames.append(frames[-1])
 
         # Stack frames as a tensor (C, T, H, W)
@@ -139,7 +183,16 @@ class D2VDataModule(pl.LightningDataModule):
 
 class VJEPA_FT(pl.LightningModule):
     def __init__(
-        self, pretrained_model_path, frame_count, lr=1e-4, weight_decay=0, drop_path=0.1
+        self,
+        pretrained_model_path,
+        output_channels,
+        output_height,
+        output_width,
+        frame_count,
+        lr=1e-4,
+        weight_decay=0,
+        drop_path=0.1,
+        num_decoder_layers=6,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -149,55 +202,50 @@ class VJEPA_FT(pl.LightningModule):
         self.weight_decay = weight_decay
         self.frame_count = frame_count
         self.pretrained_model_path = pretrained_model_path
+        self.drop_path = drop_path
+        self.output_channels = output_channels
+        self.output_height = output_height
+        self.output_width = output_width
 
         self.target_aspect_ratio: float = 0.75
         self.target_scale_interval: float = 0.15
         self.context_aspect_ratio: Number = 1
         self.context_scale: float = 0.85
+        self.patch_size = (2, 16, 16)
 
         # Load the pretrained IJEPA model for video-based architecture
-        self.pretrained_model = VJEPA.load_from_checkpoint(
-            checkpoint_path=self.pretrained_model_path
-        )
-        self.pretrained_model.layer_dropout = drop_path
-
-        self.deconv = nn.ConvTranspose3d(
-            in_channels=self.pretrained_model.embed_dim,
-            out_channels=3,
-            kernel_size=(
-                self.pretrained_model.tubelet_size,
-                self.pretrained_model.patch_size[0],
-                self.pretrained_model.patch_size[1],
-            ),
-            stride=(
-                self.pretrained_model.tubelet_size,
-                self.pretrained_model.patch_size[0],
-                self.pretrained_model.patch_size[1],
-            ),
-        )
+        self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
+        self.pretrained_model.mode = "test"
+        self.pretrained_model.layer_dropout = self.drop_path
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(self.pretrained_model.embed_dim),
-            nn.Linear(
-                self.pretrained_model.embed_dim, self.pretrained_model.num_patches
-            ),
+            nn.Linear(self.pretrained_model.embed_dim, np.prod(self.patch_size)),
             nn.Unflatten(
                 1,
                 (
-                    frame_count // self.pretrained_model.tubelet_size,
-                    self.pretrained_model.img_size[0]
-                    // self.pretrained_model.patch_size[0],
-                    self.pretrained_model.img_size[0]
-                    // self.pretrained_model.patch_size[0],
+                    frame_count // self.patch_size[0],
+                    output_height // self.patch_size[1],
+                    output_width // self.patch_size[2],
                 ),
+            ),  # Reshape into patches
+            LambdaLayer(lambda x: x.permute(0, 4, 1, 2, 3)),
+            nn.Upsample(scale_factor=(2, 2, 2), mode="trilinear", align_corners=True),
+            nn.ReLU(),
+            nn.ConvTranspose3d(
+                in_channels=np.prod(
+                    self.patch_size
+                ),  # Input channels (from the patch size)
+                out_channels=3,  # RGB output
+                kernel_size=(1, 8, 8),  # Same as the Conv3D kernel
+                stride=(1, 8, 8),  # Same stride as Conv3D
             ),
         )
 
-        # Define loss for video generation (e.g., reconstruction)
+        # define loss
         self.criterion = nn.MSELoss()
 
     def forward(self, x):
-        # TODO -- Do I have to do the whole patching and encoding here again instead of being able to use the pretrained model?
         x = self.pretrained_model(
             x,
             self.target_aspect_ratio,
@@ -206,98 +254,56 @@ class VJEPA_FT(pl.LightningModule):
             self.context_scale,
             static_scene_temporal_reasoning=True,
         )
-        # x = self.mlp_head(x)
-        return x  # Output shape: (batch, frames, 3, 224, 224)
+        print(f"SHAPE BEFORE MLP: {x.shape=}")
+        x = self.mlp_head(x)
+        print(f"SHAPE AFTER MLP: {x.shape=}")
+
+        return x
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        # TODO -- Do I add mask tokens instead of repeating the same frames and not use static pos emb
         stacked_img = x.repeat(1, 1, 8, 1, 1)
-        y_student, target_blocks, context_blocks, target_patches, context_patches = (
-            self(stacked_img)
+        print(f"{stacked_img.shape=}")
+        y_hat = self(stacked_img)
+        print(f"{y_hat.shape=}")
+        print(f"{y.shape=}")
+        save_frames_to_folder(
+            video_tensor=y_hat,
+            original_tensor=y,
+            folder_name="finetune1",
+            batch_idx=batch_idx,
         )
-
-        num_target_blocks, batch_size, num_blocks, embed_dim = y_student.shape
-        context_batch_size, context_num_blocks, context_embed_dim = context_blocks.shape
-
-        num_blocks += context_num_blocks
-
-        reconstructed_x = torch.zeros(batch_size, 784, embed_dim).cuda()
-
-        # Place the patches back in the original tensor
-        for target_block_idx in range(num_target_blocks):
-            target_patches_for_block = target_patches[
-                target_block_idx
-            ]  # Indices used in the original process
-
-            # Get the corresponding block from target_block
-            block = y_student[
-                target_block_idx
-            ]  # Shape: (batch_size, target_block_size, embed_dim)
-
-            # Place the block patches back into reconstructed_x
-            reconstructed_x[:, target_patches_for_block, :] = block
-
-        reconstructed_x[:, context_patches, :] = context_blocks
-
-        print(f"{reconstructed_x.shape=}")
-
-        y_student_reshaped = rearrange(
-            reconstructed_x, "b (t h w) e -> b e t h w", t=4, h=14, w=14
-        )
-        y_student_original = self.deconv(y_student_reshaped)
-        save_as_mp4(y_student_original)
-        loss = self.criterion(y_student_original, y)
-        accuracy = (y_student_original.argmax(dim=1) == y.argmax(dim=1)).float().mean()
-        self.log("val_loss", loss)
-        print(f"TRAIN LOSS: {loss}")
+        loss = self.criterion(y_hat, y)  # calculate loss
+        accuracy = (
+            (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
+        )  # calculate accuracy
         self.log("train_accuracy", accuracy)
-        print(f"TRAIN ACCURACY: {accuracy}")
+        self.log("train_loss", loss)
+        print("train_accuracy", accuracy)
+        print("train_loss", loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         stacked_img = x.repeat(1, 1, 8, 1, 1)
-        y_student, target_blocks, context_blocks, target_patches, context_patches = (
-            self(stacked_img)
+        print(f"{stacked_img.shape=}")
+        y_hat = self(stacked_img)
+        print(f"{y_hat.shape=}")
+        print(f"{y.shape=}")
+        save_frames_to_folder(
+            video_tensor=y_hat,
+            original_tensor=y,
+            folder_name="finetune1",
+            batch_idx=batch_idx,
         )
-
-        num_target_blocks, batch_size, num_blocks, embed_dim = y_student.shape
-        context_batch_size, context_num_blocks, context_embed_dim = context_blocks.shape
-
-        num_blocks += context_num_blocks
-
-        reconstructed_x = torch.zeros(batch_size, 784, embed_dim).cuda()
-
-        # Place the patches back in the original tensor
-        for target_block_idx in range(num_target_blocks):
-            target_patches_for_block = target_patches[
-                target_block_idx
-            ]  # Indices used in the original process
-
-            # Get the corresponding block from target_block
-            block = y_student[
-                target_block_idx
-            ]  # Shape: (batch_size, target_block_size, embed_dim)
-
-            # Place the block patches back into reconstructed_x
-            reconstructed_x[:, target_patches_for_block, :] = block
-
-        reconstructed_x[:, context_patches, :] = context_blocks
-
-        print(f"{reconstructed_x.shape=}")
-
-        y_student_reshaped = rearrange(
-            reconstructed_x, "b (t h w) e -> b e t h w", t=4, h=14, w=14
-        )
-        y_student_original = self.deconv(y_student_reshaped)
-        save_as_mp4(y_student_original)
-        loss = self.criterion(y_student_original, y)
-        accuracy = (y_student_original.argmax(dim=1) == y.argmax(dim=1)).float().mean()
-        self.log("val_loss", loss)
-        print(f"TRAIN LOSS: {loss}")
+        loss = self.criterion(y_hat, y)  # calculate loss
+        accuracy = (
+            (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
+        )  # calculate accuracy
         self.log("train_accuracy", accuracy)
-        print(f"TRAIN ACCURACY: {accuracy}")
+        self.log("train_loss", loss)
+        print("val_accuracy", accuracy)
+        print("val_loss", loss)
         return loss
 
     def configure_optimizers(self):
@@ -307,65 +313,116 @@ class VJEPA_FT(pl.LightningModule):
         return optimizer
 
 
-def save_as_mp4(video: torch.Tensor):
-    video = video[0]  # Now shape is (channels, num_frames, height, width)
+def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx):
+    # Create folder structure with unique folder names
+    base_folder = f"{folder_name}/{batch_idx}"
+    pred_folder = os.path.join(base_folder, "pred")
+    target_folder = os.path.join(base_folder, "target")
 
-    # Reorder to (num_frames, height, width, channels)
-    video = video.permute(1, 2, 3, 0)
-    video = video.detach().cpu().numpy()
-    num_frames, height, width, channels = video.shape
-    output_filename = "output_video.mp4"
-    fps = 30  # Frames per second
+    # Create directories if they don't exist
+    os.makedirs(pred_folder, exist_ok=True)
+    os.makedirs(target_folder, exist_ok=True)
 
-    # Initialize the video writer
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Codec for .mp4 format
-    out = cv2.VideoWriter(output_filename, fourcc, fps, (width, height))
+    video_tensor = video_tensor.squeeze(
+        0
+    )  # Now target_tensor has shape [3, num_frames, height, width]
+    original_tensor = original_tensor.squeeze(0)
 
-    # Write each frame to the video
-    for frame_idx in range(num_frames):
-        # Ensure the frame is in a format that OpenCV can handle (e.g., uint8)
-        frame = (
-            (video[frame_idx] * 255).clip(0, 255).astype(np.uint8)
-        )  # Scale if needed
+    video_tensor = video_tensor.cpu()  # Move to CPU if on CUDA
+    original_tensor = original_tensor.cpu()
+    # Iterate over each frame
+    for i in range(
+        video_tensor.shape[1]
+    ):  # target_tensor.shape[1] is the number of frames
+        # Extract frames from target and original tensors
+        target_frame = video_tensor[:, i, :, :]  # Shape [3, height, width]
+        original_frame = original_tensor[:, i, :, :]  # Shape [3, height, width]
 
-        # If the channels are in the wrong order (e.g., PyTorch's RGB format), convert to BGR
-        if channels == 3:  # Assuming the format is (H, W, C) with C=3
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        target_frame = target_frame - target_frame.min()  # Shift the minimum value to 0
+        target_frame = target_frame / target_frame.max()  # Normalize to [0, 1]
+        target_frame = target_frame * 255  # Scale to [0, 255]
+        target_frame = target_frame.byte()
 
-        out.write(frame)
+        original_frame = (
+            original_frame - original_frame.min()
+        )  # Shift the minimum value to 0
+        original_frame = original_frame / original_frame.max()  # Normalize to [0, 1]
+        original_frame = original_frame * 255  # Scale to [0, 255]
+        original_frame = original_frame.byte()
 
-    # Release the video writer
-    out.release()
+        # Convert the tensor to a PIL Image (from [C, H, W] to [H, W, C])
+        target_frame_image = target_frame.permute(
+            1, 2, 0
+        ).byte()  # Shape [height, width, 3]
+        original_frame_image = original_frame.permute(
+            1, 2, 0
+        ).byte()  # Shape [height, width, 3]
 
-    print(f"Video saved as {output_filename}")
+        # Convert to PIL Image and save them in respective subfolders
+        target_pil_image = Image.fromarray(
+            target_frame_image.numpy()
+        )  # Convert to PIL Image
+        original_pil_image = Image.fromarray(
+            original_frame_image.numpy()
+        )  # Convert to PIL Image
+
+        # Save the frames as PNG images
+        target_pil_image.save(
+            os.path.join(pred_folder, f"frame_{i+1}.png")
+        )  # Save target frame
+        original_pil_image.save(
+            os.path.join(target_folder, f"frame_{i+1}.png")
+        )  # Save original frame
+
+    print(
+        f"Saved {video_tensor.shape[1]} frames to 'target' and 'original' subfolders under '{base_folder}'."
+    )
 
 
 if __name__ == "__main__":
 
-    dataset: Path = Path("E:/ahmad/kinetics-dataset/smaller/test").resolve()
+    torch.cuda.empty_cache()
+    dataset: Path = Path("E:/ahmad/kinetics-dataset/smaller/train").resolve()
+
+    img_size: int = 224
+    frame_count: int = 8
 
     transform = transforms.Compose(
-        [transforms.ToPILImage(), transforms.Resize((224, 224)), transforms.ToTensor()]
+        [
+            transforms.ToPILImage(),
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+        ]
     )
 
     dataset_module = D2VDataModule(
-        dataset_path=dataset, transform=transform, num_frames=8
+        dataset_path=dataset, transform=transform, num_frames=frame_count
     )
 
     model = VJEPA_FT(
-        pretrained_model_path="lightning_logs/v-jepa/version_33/checkpoints/epoch=0-step=1000-v2.ckpt",
-        frame_count=8,
+        pretrained_model_path="D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_0/checkpoints/epoch=0-step=6000.ckpt",
+        frame_count=frame_count,
+        output_channels=3,
+        output_height=img_size,
+        output_width=img_size,
     )
+    for name, param in model.pretrained_model.named_parameters():
+        print(name, param.requires_grad)
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
 
+    logger = TensorBoardLogger(
+        "lightning_logs",
+        name="v-jepa/finetune/",
+    )
+
     trainer = pl.Trainer(
-        accelerator="gpu",
+        accelerator="cpu",
         devices=1,
-        # precision=16,
         max_epochs=1,
         callbacks=[lr_monitor, model_summary],
+        logger=logger,
         gradient_clip_val=0.1,
     )
 

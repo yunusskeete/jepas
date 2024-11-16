@@ -296,9 +296,6 @@ class JEPA_base(VisionTransformer):
         return (
             prediction_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
             target_blocks,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-            context_block,
-            target_patches,
-            context_patches,
         )
 
     @staticmethod

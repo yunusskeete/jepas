@@ -33,7 +33,7 @@ if __name__ == "__main__":
     # TensorBoard Logger
     logger = TensorBoardLogger(
         "lightning_logs",
-        name="v-jepa",
+        name="v-jepa/pretrain/images",
     )
 
     # Path to the checkpoint to resume from (use the latest checkpoint if available)
@@ -54,48 +54,9 @@ if __name__ == "__main__":
         logger=logger,
     )
 
-    model.mode = "images"
+    model.phase = "images"
 
     trainer_images.fit(
-        model,
-        dataset_videos,
-        ckpt_path=checkpoint_path,
-    )
-
-    print("STARTING VIDEOS")
-
-    trainer_videos = pl.Trainer(
-        accelerator="gpu",
-        devices=1,
-        # precision="16-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
-        max_epochs=1,
-        gradient_clip_val=0.1,
-        callbacks=[lr_monitor, model_summary],
-        logger=logger,
-    )
-    model.mode = "videos"
-
-    trainer_videos.fit(
-        model,
-        dataset_videos,
-        ckpt_path=checkpoint_path,
-    )
-
-    print("STARTING STATIC SCENES")
-
-    trainer_static = pl.Trainer(
-        accelerator="gpu",
-        devices=1,
-        # precision="16-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
-        max_epochs=1,
-        gradient_clip_val=0.1,
-        callbacks=[lr_monitor, model_summary],
-        logger=logger,
-    )
-
-    model.mode = "static_scene"
-
-    trainer_static.fit(
         model,
         dataset_videos,
         ckpt_path=checkpoint_path,

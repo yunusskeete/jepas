@@ -555,6 +555,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         # Define hyperparameters
         self.lr = lr
         self.weight_decay = weight_decay
+        self.phase = "video"
         self.m = m  # momentum
         self.target_aspect_ratio = target_aspect_ratio
         self.target_scale_interval = target_scale_interval
@@ -921,21 +922,21 @@ class VJEPA(JEPA_base, pl.LightningModule):
         torch.Tensor
             The aggregated loss for the batch.
         """
-        if self.mode == "images":
+        if self.phase == "images":
             # Logic for the first dataset (e.g., image clips)
             return self.training_step_images(batch, batch_idx)
-        elif self.mode == "videos":
+        elif self.phase == "videos":
             # Logic for the second dataset (e.g., videos)
             return self.training_step_videos(
                 batch, batch_idx, static_scene_temporal_reasoning=False
             )
-        elif self.mode == "static_scene":
+        elif self.phase == "static_scene":
             # Logic for the third dataset (e.g., static scene temporal reasoning)
             return self.training_step_videos(
                 batch, batch_idx, static_scene_temporal_reasoning=True
             )
         else:
-            raise ValueError(f"Unsupported mode: {self.mode}")
+            raise ValueError(f"Unsupported mode: {self.phase}")
 
     def training_step_images(
         self,

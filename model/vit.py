@@ -195,7 +195,10 @@ class VisionTransformer(nn.Module):
         x_embed = self.post_emb_norm_vit(x_embed)  # (batch, num_patches, embed_dim)
 
         if patch_embed_only:
-            return x_embed  # (batch, num_patches, embed_dim)
+            if static_scene_temporal_reasoning:
+                return x_embed, x_stacked
+            else:
+                return x_embed
 
         # Encode the patch embeddings using the student encoder
         x_embed = self.encoder(
