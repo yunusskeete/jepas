@@ -1130,7 +1130,6 @@ class TJEPA(pl.LightningModule):
         self.end_depth = enc_depth
         self.num_heads = num_heads
         self.layer_dropout = layer_dropout
-        self.target_prob_range = target_prob_range
 
         self.embedding_layer = nn.Embedding(self.vocab_size, self.embed_dim)
 
@@ -1232,11 +1231,11 @@ class TJEPA(pl.LightningModule):
         x: torch.Tensor,  # (batch_size, seq_length)
         # attention_masks: torch.Tensor,
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
-        target_indices: List[int] = TJEPA.generate_target_indices(
+        target_indices: List[List[int]] = TJEPA.generate_target_indices(
             sequence_batch=x,  # (batch_size, seq_length)
             target_prob_range=self.target_prob_range,
         )
-        context_indices: List[int] = TJEPA.generate_context_indices(
+        context_indices: List[List[int]] = TJEPA.generate_context_indices(
             sequence_batch=x,  # (batch_size, seq_length)
             target_prob_range=self.target_prob_range,
         )

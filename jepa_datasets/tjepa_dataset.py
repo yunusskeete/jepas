@@ -63,6 +63,8 @@ class TextDataModule(pl.LightningDataModule):
         batch_size: int = 16,
         num_workers: int = 4,
         pin_memory: bool = True,
+        persistent_workers: bool = True,
+        prefetch_factor: Optional[int] = None,
         shuffle: bool = True,
     ):
         super().__init__()
@@ -71,6 +73,8 @@ class TextDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.prefetch_factor = prefetch_factor
         self.shuffle = shuffle
 
         self.text_dataset = HuggingfaceDatasetWrapper(
@@ -85,10 +89,12 @@ class TextDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         # Step 1: Define the split sizes for train, validation, and test sets
-        dataset_size = len(self.text_dataset)
-        train_size = int(0.8 * dataset_size)  # 80% for training
-        val_size = int(0.1 * dataset_size)  # 10% for validation
-        test_size = dataset_size - train_size - val_size  # Remaining 10% for testing
+        dataset_size: int = len(self.text_dataset)
+        train_size: int = int(0.8 * dataset_size)  # 80% for training
+        val_size: int = int(0.1 * dataset_size)  # 10% for validation
+        test_size: int = (
+            dataset_size - train_size - val_size
+        )  # Remaining 10% for testing
 
         # Step 2: Create indices for each split
         indices = torch.randperm(dataset_size).tolist()  # Shuffle the indices
@@ -107,6 +113,8 @@ class TextDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
+            prefetch_factor=self.prefetch_factor,
             shuffle=False,
         )
 
@@ -116,6 +124,8 @@ class TextDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
+            prefetch_factor=self.prefetch_factor,
             shuffle=False,
         )
 
@@ -125,6 +135,8 @@ class TextDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            persistent_workers=self.persistent_workers,
+            prefetch_factor=self.prefetch_factor,
             shuffle=False,
         )
 
