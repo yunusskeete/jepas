@@ -1094,7 +1094,7 @@ class TJEPA(pl.LightningModule):
         enc_depth: int = 8,
         num_heads: int = 8,
         layer_dropout: float = 0.0,
-        decoder_depth: int = 6,  # TODO: Make underpowered to prevent collapse
+        decoder_depth: int = 4,  # NOTE: Make underpowered to prevent collapse
         lr: float = 1e-3,
         weight_decay: float = 0.05,
         target_prob_range: Tuple[float, float] = (
@@ -1146,7 +1146,7 @@ class TJEPA(pl.LightningModule):
 
         self.predictor = Predictor(
             embed_dim=self.embed_dim,
-            num_heads=self.num_heads,
+            num_heads=self.num_heads // 2,
             depth=decoder_depth,
             layer_dropout=self.layer_dropout,
         )
@@ -1161,7 +1161,8 @@ class TJEPA(pl.LightningModule):
         sequence_batch: torch.Tensor,
         # attention_masks: torch.Tensor,
         target_prob_range: Tuple[float, float],
-    ) -> List[List[int]]:
+        # ) -> List[List[int]]:
+    ) -> torch.Tensor:
         """
         Generate target indices for a 1D sequence.
 
@@ -1172,22 +1173,26 @@ class TJEPA(pl.LightningModule):
 
         Returns:
             List[List[int]]: A list of lists containing indices of target tokens.
+            torch.Tensor: A boolean tensor containing indices of target tokens.
         """
         target_prob: float = np.random.uniform(
             low=target_prob_range[0], high=target_prob_range[1]
         )
 
-        target_indices: List[List[int]] = []
+        # target_indices: List[List[int]] = []
 
-        for sequence in sequence_batch:
-            sequence_length: int = torch.count_nonzero(
-                sequence
-            )  # NOTE: The tokeniser padding token is 0
+        # for sequence in sequence_batch:
+        #     sequence_length: int = torch.count_nonzero(
+        #         sequence
+        #     )  # NOTE: The tokeniser padding token is 0
 
-            num_target_tokens: int = max(int(sequence_length * target_prob), 1)
-            # Randomly select 'num_target_tokens' indices from the sequence
-            indices: torch.Tensor = torch.randperm(sequence_length)[:num_target_tokens]
-            target_indices.append(indices.tolist())
+        #     num_target_tokens: int = max(int(sequence_length * target_prob), 1)
+        #     # Randomly select 'num_target_tokens' indices from the sequence
+        #     indices: torch.Tensor = torch.randperm(sequence_length)[:num_target_tokens]
+        #     target_indices.append(indices.tolist())
+        target_indices: torch.Tensor = torch.bernoulli(
+            torch.full(sequence_batch.shape, target_prob)  # target_probability_matrix
+        ).bool()
 
         return target_indices
 
@@ -1196,7 +1201,8 @@ class TJEPA(pl.LightningModule):
         sequence_batch: torch.Tensor,
         # attention_masks: torch.Tensor,
         target_prob_range: Tuple[float, float],
-    ) -> List[List[int]]:
+        # ) -> List[List[int]]:
+    ) -> torch.Tensor:
         """
         Generate context tokens for a 1D sequence.
 
@@ -1207,22 +1213,26 @@ class TJEPA(pl.LightningModule):
 
         Returns:
             List[List[int]]: A list of lists containing indices of context tokens.
+            torch.Tensor: A boolean tensor containing indices of context tokens.
         """
         context_prob: float = 1 - np.random.uniform(
             low=target_prob_range[0], high=target_prob_range[1]
         )
 
-        context_indices: List[List[int]] = []
+        # context_indices: List[List[int]] = []
 
-        for sequence in sequence_batch:
-            sequence_length: int = torch.count_nonzero(
-                sequence
-            )  # NOTE: The tokeniser padding token is 0
+        # for sequence in sequence_batch:
+        #     sequence_length: int = torch.count_nonzero(
+        #         sequence
+        #     )  # NOTE: The tokeniser padding token is 0
 
-            num_context_tokens: int = max(int(sequence_length * context_prob), 1)
-            # Randomly select 'num_context_tokens' indices from the sequence
-            indices: torch.Tensor = torch.randperm(sequence_length)[:num_context_tokens]
-            context_indices.append(indices.tolist())
+        #     num_context_tokens: int = max(int(sequence_length * context_prob), 1)
+        #     # Randomly select 'num_context_tokens' indices from the sequence
+        #     indices: torch.Tensor = torch.randperm(sequence_length)[:num_context_tokens]
+        #     context_indices.append(indices.tolist())
+        context_indices: torch.Tensor = torch.bernoulli(
+            torch.full(sequence_batch.shape, context_prob)  # context_probability_matrix
+        ).bool()
 
         return context_indices
 
@@ -1231,11 +1241,13 @@ class TJEPA(pl.LightningModule):
         x: torch.Tensor,  # (batch_size, seq_length)
         # attention_masks: torch.Tensor,
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
-        target_indices: List[List[int]] = TJEPA.generate_target_indices(
+        # target_indices: List[List[int]] = TJEPA.generate_target_indices(
+        target_indices: torch.Tensor = TJEPA.generate_target_indices(
             sequence_batch=x,  # (batch_size, seq_length)
             target_prob_range=self.target_prob_range,
         )
-        context_indices: List[List[int]] = TJEPA.generate_context_indices(
+        # context_indices: List[List[int]] = TJEPA.generate_context_indices(
+        context_indices: torch.Tensor = TJEPA.generate_context_indices(
             sequence_batch=x,  # (batch_size, seq_length)
             target_prob_range=self.target_prob_range,
         )
@@ -1327,12 +1339,13 @@ class TJEPA(pl.LightningModule):
         torch.Tensor
             Training loss.
         """
-        x, attention_masks = batch
+        # x, attention_masks = batch
         (
             y_student,  # (batch_size, target_block_size, embed_dim)
             y_teacher,  # (batch_size, target_block_size, embed_dim)
         ) = self(
-            x=x,  # (batch_size, seq_length)
+            # x=x,  # (batch_size, seq_length)
+            x=batch,  # (batch_size, seq_length)
             # attention_masks=attention_masks,  # (batch_size, seq_length)
         )
 
@@ -1364,12 +1377,13 @@ class TJEPA(pl.LightningModule):
         torch.Tensor
             The student embedding of the input sequence.
         """
-        x, attention_masks = batch
+        # x, attention_masks = batch
         (
             y_student,  # (batch_size, target_block_size, embed_dim)
             y_teacher,  # (batch_size, target_block_size, embed_dim)
         ) = self(
-            x=x,  # (batch_size, seq_length)
+            # x=x,  # (batch_size, seq_length)
+            x=batch,  # (batch_size, seq_length)
             # attention_masks=attention_masks,  # (batch_size, seq_length)
         )  # (batch_size, seq_length, embed_dim)
 

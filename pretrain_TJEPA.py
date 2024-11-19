@@ -28,12 +28,16 @@ if __name__ == "__main__":
     dataset = TextDataModule(
         hf_dataset=hf_dataset,
         tokeniser=tokeniser,
-        batch_size=32,
+        max_length=128,
         pin_memory=True,
         prefetch_factor=4,
+        # batch_size=24,
     )
 
-    model = TJEPA(lr=1e-3)
+    model = TJEPA(
+        lr=1e-3,
+        # embed_dim=32,
+    )
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
@@ -52,12 +56,10 @@ if __name__ == "__main__":
         gradient_clip_val=0.1,
         callbacks=[lr_monitor, model_summary],
         logger=logger,
+        val_check_interval=0.1,  # Run validation every 25% of an epoch
     )
 
     # Path to the checkpoint to resume from (use the latest checkpoint if available)
-    checkpoint_path: Optional[str] = (
-        # "lightning_logs/t-jepa/version_22/checkpoints/epoch=3-step=120620.ckpt"
-        None
-    )
+    checkpoint_path: Optional[str] = None
 
     trainer.fit(model, dataset, ckpt_path=checkpoint_path)

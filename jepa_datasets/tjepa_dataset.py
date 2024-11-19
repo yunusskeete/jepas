@@ -23,16 +23,19 @@ class HuggingfaceDatasetWrapper(Dataset):
         hf_dataset: datasets.arrow_dataset.Dataset,
         tokeniser: Optional[BertTokenizer] = None,
         max_length: int = 512,
+        return_attn_masks: bool = False,
     ):
         """
         Args:
             hf_dataset: Huggingface dataset to wrap.
             tokeniser: Optional tokeniser to tokenize the text data.
             max_length: Maximum length of tokenized sequences (if tokeniser is used).
+            return_attn_masks: Flag to determine whether attention masks are returned.
         """
         self.hf_dataset = hf_dataset
         self.tokeniser = tokeniser
         self.max_length = max_length
+        self.return_attn_masks = return_attn_masks
 
     def __len__(self) -> int:
         # Return the number of samples in the dataset
@@ -51,7 +54,11 @@ class HuggingfaceDatasetWrapper(Dataset):
             truncation=True,
             max_length=self.max_length,
         )
-        return encoding["input_ids"].squeeze(), encoding["attention_mask"].squeeze()
+        return (
+            encoding["input_ids"].squeeze()
+            if not self.return_attn_masks
+            else (encoding["input_ids"].squeeze(), encoding["attention_mask"].squeeze())
+        )
 
 
 class TextDataModule(pl.LightningDataModule):
@@ -60,16 +67,18 @@ class TextDataModule(pl.LightningDataModule):
         hf_dataset: datasets.arrow_dataset.Dataset,
         tokeniser: BertTokenizer,
         max_length: int = 512,
+        return_attn_masks: bool = False,
         batch_size: int = 16,
-        num_workers: int = 4,
+        num_workers: int = 2,
         pin_memory: bool = True,
         persistent_workers: bool = True,
-        prefetch_factor: Optional[int] = None,
+        prefetch_factor: Optional[int] = 4,
         shuffle: bool = True,
     ):
         super().__init__()
         self.tokeniser = tokeniser
         self.max_length = max_length
+        self.return_attn_masks = return_attn_masks
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -81,6 +90,7 @@ class TextDataModule(pl.LightningDataModule):
             hf_dataset=hf_dataset,
             tokeniser=self.tokeniser,
             max_length=self.max_length,
+            return_attn_masks=self.return_attn_masks,
         )
 
         self.train_dataset: Optional[Subset] = None
@@ -90,11 +100,11 @@ class TextDataModule(pl.LightningDataModule):
     def setup(self, stage=None):
         # Step 1: Define the split sizes for train, validation, and test sets
         dataset_size: int = len(self.text_dataset)
-        train_size: int = int(0.8 * dataset_size)  # 80% for training
-        val_size: int = int(0.1 * dataset_size)  # 10% for validation
+        train_size: int = int(0.96 * dataset_size)  # 96% for training
+        val_size: int = int(0.02 * dataset_size)  # 2% for validation
         test_size: int = (
             dataset_size - train_size - val_size
-        )  # Remaining 10% for testing
+        )  # Remaining 2% for testing
 
         # Step 2: Create indices for each split
         indices = torch.randperm(dataset_size).tolist()  # Shuffle the indices
