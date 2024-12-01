@@ -843,6 +843,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         context_scale: float,
         static_scene_temporal_reasoning: bool = False,
         use_static_positional_embedding: bool = False,
+        random_t: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         target_patches: List[List[int]]
         all_unique_target_patches: Set[int]
@@ -866,7 +867,95 @@ class VJEPA(JEPA_base, pl.LightningModule):
             context_patches=context_patches,
             static_scene_temporal_reasoning=static_scene_temporal_reasoning,
             use_static_positional_embedding=use_static_positional_embedding,
+            random_t=random_t,
         )
+
+    def forward_video(self, batch, static_scene_temporal_reasoning, running_loss):
+        clip: torch.Tensor
+        for clip in batch:
+            # Generate random target and context aspect ratio and scale
+            target_aspect_ratio: float = np.random.uniform(
+                self.target_aspect_ratio[0], self.target_aspect_ratio[1]
+            )
+            target_scale: float = np.random.uniform(
+                low=self.target_scale_interval[0], high=self.target_scale_interval[1]
+            )
+
+            context_scale: float = np.random.uniform(
+                self.context_scale[0], self.context_scale[1]
+            )
+
+            (
+                y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+                y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+            ) = self(
+                x=clip,  # (batch_size, time, channels, img_height, img_width)
+                target_aspect_ratio=target_aspect_ratio,
+                target_scale=target_scale,
+                context_aspect_ratio=self.context_aspect_ratio,
+                context_scale=context_scale,
+                static_scene_temporal_reasoning=static_scene_temporal_reasoning,
+            )
+
+            # Compute the loss for the current clip
+            loss: torch.Tensor = self.criterion(y_student, y_teacher)
+
+            # Accumulate the loss
+            running_loss += loss
+
+        # Normalize the running loss by the batch size
+        running_loss /= len(batch)
+
+    def forward_image(self, batch, running_loss, original_clip):
+        _, _, num_frames, _, _ = original_clip.shape  # 'time' is the third dimension
+
+        # Generate new videos by repeating each frame
+        new_videos = []
+        for frame_idx in range(num_frames):
+            # Extract the current frame (shape: [batch_size, in_channels, 1, height, width])
+            frame = original_clip[
+                :, :, frame_idx : frame_idx + 1, :, :
+            ]  # Select frame along 'time'
+
+            # Repeat the frame to create a video of original length (shape: [batch_size, in_channels, num_frames, height, width])
+            repeated_video = frame.repeat(
+                1, 1, num_frames, 1, 1
+            )  # Repeat across 'time' dimension
+            new_videos.append(repeated_video)
+
+        # Generate random target and context aspect ratio and scale
+        target_aspect_ratio: float = np.random.uniform(
+            self.target_aspect_ratio[0], self.target_aspect_ratio[1]
+        )
+        target_scale: float = np.random.uniform(
+            low=self.target_scale_interval[0],
+            high=self.target_scale_interval[1],
+        )
+        context_scale: float = np.random.uniform(
+            self.context_scale[0], self.context_scale[1]
+        )
+
+        # Forward pass with the frame-stacked video clip
+        (
+            y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+            y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
+        ) = self(
+            x=new_videos[0],  # Frame-stacked video clip
+            target_aspect_ratio=target_aspect_ratio,
+            target_scale=target_scale,
+            context_aspect_ratio=self.context_aspect_ratio,
+            context_scale=context_scale,
+            use_static_positional_embedding=True,
+        )
+
+        # Compute the loss for the current clip
+        loss: torch.Tensor = self.criterion(y_student, y_teacher)
+
+        # Accumulate the loss
+        running_loss += loss
+
+        # Normalize the running loss by the total number of processed videos
+        running_loss /= len(batch) * num_frames
 
     def update_momentum(self, m: float) -> None:
         """
@@ -962,60 +1051,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         running_loss: torch.Tensor = torch.tensor(0.0, device=self.device)
 
         for original_clip in batch:
-            # The original clip has shape [batch_size, in_channels, time, height, width]
-            # original_clip = original_clip[0]
-            _, _, num_frames, _, _ = (
-                original_clip.shape
-            )  # 'time' is the third dimension
-
-            # Generate new videos by repeating each frame
-            new_videos = []
-            for frame_idx in range(num_frames):
-                # Extract the current frame (shape: [batch_size, in_channels, 1, height, width])
-                frame = original_clip[
-                    :, :, frame_idx : frame_idx + 1, :, :
-                ]  # Select frame along 'time'
-
-                # Repeat the frame to create a video of original length (shape: [batch_size, in_channels, num_frames, height, width])
-                repeated_video = frame.repeat(
-                    1, 1, num_frames, 1, 1
-                )  # Repeat across 'time' dimension
-                new_videos.append(repeated_video)
-
-            for clip in new_videos:
-                # Generate random target and context aspect ratio and scale
-                target_aspect_ratio: float = np.random.uniform(
-                    self.target_aspect_ratio[0], self.target_aspect_ratio[1]
-                )
-                target_scale: float = np.random.uniform(
-                    low=self.target_scale_interval[0],
-                    high=self.target_scale_interval[1],
-                )
-                context_scale: float = np.random.uniform(
-                    self.context_scale[0], self.context_scale[1]
-                )
-
-                # Forward pass with the frame-stacked video clip
-                (
-                    y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-                    y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-                ) = self(
-                    x=clip,  # Frame-stacked video clip
-                    target_aspect_ratio=target_aspect_ratio,
-                    target_scale=target_scale,
-                    context_aspect_ratio=self.context_aspect_ratio,
-                    context_scale=context_scale,
-                    use_static_positional_embedding=True,
-                )
-
-                # Compute the loss for the current clip
-                loss: torch.Tensor = self.criterion(y_student, y_teacher)
-
-                # Accumulate the loss
-                running_loss += loss
-
-            # Normalize the running loss by the total number of processed videos
-            running_loss /= len(batch) * num_frames
+            self.forward_image(batch, running_loss, original_clip)
 
             self.log("train_loss", running_loss)
             print(f"IMAGES {running_loss=}")
@@ -1046,40 +1082,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         # Initialize the running loss to zero
         running_loss: torch.Tensor = torch.tensor(0.0, device=self.device)
 
-        clip: torch.Tensor
-        for clip in batch:
-            # Generate random target and context aspect ratio and scale
-            target_aspect_ratio: float = np.random.uniform(
-                self.target_aspect_ratio[0], self.target_aspect_ratio[1]
-            )
-            target_scale: float = np.random.uniform(
-                low=self.target_scale_interval[0], high=self.target_scale_interval[1]
-            )
-
-            context_scale: float = np.random.uniform(
-                self.context_scale[0], self.context_scale[1]
-            )
-
-            (
-                y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-                y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-            ) = self(
-                x=clip,  # (batch_size, time, channels, img_height, img_width)
-                target_aspect_ratio=target_aspect_ratio,
-                target_scale=target_scale,
-                context_aspect_ratio=self.context_aspect_ratio,
-                context_scale=context_scale,
-                static_scene_temporal_reasoning=static_scene_temporal_reasoning,
-            )
-
-            # Compute the loss for the current clip
-            loss: torch.Tensor = self.criterion(y_student, y_teacher)
-
-            # Accumulate the loss
-            running_loss += loss
-
-        # Normalize the running loss by the batch size
-        running_loss /= len(batch)
+        self.forward_video(batch, static_scene_temporal_reasoning, running_loss)
 
         self.log("train_loss", running_loss)
         if static_scene_temporal_reasoning:
@@ -1110,33 +1113,88 @@ class VJEPA(JEPA_base, pl.LightningModule):
         torch.Tensor
             The aggregated loss for the batch.
         """
-        # Generate random target and context aspect ratio and scale
-        target_aspect_ratio: float = np.random.uniform(
-            self.target_aspect_ratio[0], self.target_aspect_ratio[1]
-        )
-        target_scale: float = np.random.uniform(
-            low=self.target_scale_interval[0], high=self.target_scale_interval[1]
-        )
+        if self.phase == "images":
+            # Logic for the first dataset (e.g., image clips)
+            return self.val_step_images(batch, batch_idx)
+        elif self.phase == "videos":
+            # Logic for the second dataset (e.g., videos)
+            return self.val_step_videos(
+                batch, batch_idx, static_scene_temporal_reasoning=False
+            )
+        elif self.phase == "static_scene":
+            # Logic for the third dataset (e.g., static scene temporal reasoning)
+            return self.val_step_videos(
+                batch, batch_idx, static_scene_temporal_reasoning=True
+            )
+        else:
+            raise ValueError(f"Unsupported mode: {self.phase}")
 
-        context_scale: float = np.random.uniform(
-            self.context_scale[0], self.context_scale[1]
-        )
+    def val_step_images(
+        self,
+        batch: List[torch.Tensor],  # clips
+        batch_idx: int,
+    ) -> torch.Tensor:
+        """
+        Create new video clips from each frame of the original video, where each new clip
+        is a single frame repeated to maintain the original video length.
 
-        (
-            y_student,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-            y_teacher,  # (num_target_blocks, batch_size, target_block_size, embed_dim)
-        ) = self(
-            x=batch,
-            target_aspect_ratio=target_aspect_ratio,
-            target_scale=target_scale,
-            context_aspect_ratio=self.context_aspect_ratio,
-            context_scale=context_scale,
-        )
+        Parameters
+        ----------
+        batch : List[torch.Tensor]
+            A list of tensors representing the batch of data (video clips).
+        batch_idx : int
+            Index of the batch in the current epoch.
 
-        loss: torch.Tensor = self.criterion(y_student, y_teacher)
-        self.log("val_loss", loss)
+        Returns
+        -------
+        torch.Tensor
+            The aggregated loss for the batch.
+        """
+        running_loss: torch.Tensor = torch.tensor(0.0, device=self.device)
 
-        return loss
+        for original_clip in batch:
+            # The original clip has shape [batch_size, in_channels, time, height, width]
+            # original_clip = original_clip[0]
+            self.forward_image(batch, running_loss, original_clip)
+
+            self.log("val_loss", running_loss)
+            print(f"IMAGES {running_loss=}")
+
+        return running_loss
+
+    def val_step_videos(
+        self,
+        batch: List[torch.Tensor],  # clips
+        batch_idx: int,
+        static_scene_temporal_reasoning: bool = False,
+    ) -> torch.Tensor:
+        """
+        Perform a training step for each video clip (tensor) in the batch of clips (list of tensors).
+
+        Parameters
+        ----------
+        batch : List[torch.Tensor]
+            A list of tensors representing the batch of data (video clips).
+        batch_idx : int
+            Index of the batch in the current epoch.
+
+        Returns
+        -------
+        torch.Tensor
+            The aggregated loss for the batch.
+        """
+        # Initialize the running loss to zero
+        running_loss: torch.Tensor = torch.tensor(0.0, device=self.device)
+
+        self.forward_video(batch, static_scene_temporal_reasoning, running_loss)
+
+        self.log("val_loss", running_loss)
+        if static_scene_temporal_reasoning:
+            print(f"STATIC SCENE: {running_loss=}")
+        else:
+            print(f"VIDEOS: {running_loss=}")
+
+        return running_loss
 
     def predict_step(  # pylint: disable=arguments-differ
         self,

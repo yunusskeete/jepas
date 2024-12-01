@@ -14,7 +14,7 @@ from model import VJEPA
 if __name__ == "__main__":
 
     dataset_path: Path = Path(
-        "E:/ahmad/kinetics-dataset/smaller"
+        "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
     dataset_videos = VideoDataModule(
@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
     # Path to the checkpoint to resume from (use the latest checkpoint if available)
     checkpoint_path: Optional[str] = (
-        "D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_9/checkpoints/epoch=0-step=6000.ckpt"
+        "D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_0/checkpoints/epoch=0-step=21000.ckpt"
         # None
     )
 
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     trainer_static = pl.Trainer(
         accelerator="gpu",
         devices=1,
-        max_epochs=1,
+        max_epochs=3,
         gradient_clip_val=0.1,
         callbacks=[lr_monitor, model_summary],
         logger=logger,

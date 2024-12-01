@@ -16,7 +16,7 @@ from pytorch_lightning.callbacks import (
 from jepa_datasets import VideoDataModule
 
 from utils.types import Number
-from pretrain_VJEPA_static_scene import VJEPA
+from model.model import VJEPA
 from combine_Loss import TemporalConsistencyLoss
 
 
@@ -59,18 +59,18 @@ class VJEPA_FT(pl.LightningModule):
         self.target_scale_interval: float = 0.15
         self.context_aspect_ratio: Number = 1
         self.context_scale: float = 0.85
-        self.patch_size = (4, 16, 16)
+        self.patch_size = (6, 16, 16)
 
         # Load the pretrained IJEPA model for video-based architecture
         self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
         self.pretrained_model.mode = "test"
-        self.pretrained_model.phase = "videos"
+        self.pretrained_model.phase = "images"
         self.pretrained_model.layer_dropout = self.drop_path
         self.average_pool = nn.AvgPool1d((self.pretrained_model.embed_dim), stride=1)
 
         self.mlp_head = nn.Sequential(
-            nn.LayerNorm(self.pretrained_model.embed_dim),
-            nn.Linear(self.pretrained_model.embed_dim, np.prod(self.patch_size)),
+            nn.LayerNorm(self.pretrained_model.num_patches),
+            nn.Linear(self.pretrained_model.num_patches, np.prod(self.patch_size)),
             nn.Unflatten(
                 1,
                 (
@@ -114,7 +114,7 @@ class VJEPA_FT(pl.LightningModule):
             context_aspect_ratio=self.context_aspect_ratio,
             context_scale=self.context_scale,
             static_scene_temporal_reasoning=False,
-            use_static_positional_embedding=False,
+            use_static_positional_embedding=True,
         )
         print(f"SHAPE BEFORE MLP: {x.shape=}")
         # x = self.average_pool(x)  # conduct average pool like in paper
@@ -129,14 +129,16 @@ class VJEPA_FT(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         y = batch[0]
-        print(f"{y.shape=}")
-        y_hat = self(x=y, random_t=0)
+        x = y[:, :, 0:1, :, :]
+        stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
+        print(f"{stacked_img.shape=}")
+        y_hat = self(x=stacked_img, random_t=0)
         print(f"{y_hat.shape=}")
         print(f"{y.shape=}")
         save_frames_to_folder(
             video_tensor=y_hat,
             original_tensor=y,
-            folder_name="finetune1/videos",
+            folder_name="finetune1/images/",
             batch_idx=batch_idx,
         )
         loss = self.criterion(y_hat, y)  # calculate loss
@@ -151,14 +153,16 @@ class VJEPA_FT(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         y = batch[0]
-        print(f"{y.shape=}")
-        y_hat = self(x=y, random_t=0)
+        x = y[:, :, 0:1, :, :]
+        stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
+        print(f"{stacked_img.shape=}")
+        y_hat = self(x=stacked_img, random_t=0)
         print(f"{y_hat.shape=}")
         print(f"{y.shape=}")
         save_frames_to_folder(
             video_tensor=y_hat,
             original_tensor=y,
-            folder_name="finetune1/videos",
+            folder_name="finetune1/images/",
             batch_idx=batch_idx,
         )
         loss = self.criterion(y_hat, y)  # calculate loss
@@ -261,7 +265,7 @@ if __name__ == "__main__":
     )
 
     model = VJEPA_FT(
-        pretrained_model_path="D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_0/checkpoints/epoch=0-step=21000.ckpt",
+        pretrained_model_path="D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/images/version_2/checkpoints/epoch=0-step=21000.ckpt",
         frame_count=frame_count,
         output_channels=3,
         output_height=img_size,
@@ -273,7 +277,7 @@ if __name__ == "__main__":
 
     logger = TensorBoardLogger(
         "lightning_logs",
-        name="v-jepa/finetune/videos/",
+        name="v-jepa/finetune/images/",
     )
 
     trainer = pl.Trainer(

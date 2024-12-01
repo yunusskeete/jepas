@@ -16,7 +16,7 @@ class VisionTransformer(nn.Module):
         img_size: Union[int, Tuple[int, int]] = 224,
         patch_size: Union[int, Tuple[int, int]] = 16,
         num_frames: int = 1,
-        tubelet_size: int = 2,
+        tubelet_size: int = 4,
         in_chans: int = 3,
         embed_dim: int = 64,
         enc_depth: int = 8,
@@ -81,39 +81,6 @@ class VisionTransformer(nn.Module):
             nn.LayerNorm(embed_dim) if self.post_enc_norm else nn.Identity()
         )  # student encoder
 
-    def pseudo_3d_tensor(
-        self, x: torch.Tensor, random_t: int, original_t: int
-    ) -> torch.Tensor:
-        """
-        Extracts a single frame from a 3D tensor and stacks it across the time dimension.
-
-        Args:
-            x (torch.Tensor): Input tensor with shape `[batch_size, channels, time, height, width]`.
-            random_t (int): Time index to select a frame from the tensor.
-
-        Raises:
-            AssertionError: If the extracted frame does not match the original tensor slice or if the stacked tensor shape is incorrect.
-
-        Returns:
-            torch.Tensor: The extracted frame stacked across the time dimension.
-        """
-        x_single_frame = x[:, :, random_t, :, :]
-        print(f"{x_single_frame.shape=}")
-
-        assert torch.equal(
-            x_single_frame, x[:, :, random_t, :, :]
-        ), "single frame not equal to frame in tensor"
-
-        x_single_frame_stacked = x_single_frame.unsqueeze(2).expand(
-            -1, -1, original_t, -1, -1
-        )
-
-        assert (
-            x_single_frame_stacked.shape == x.shape
-        ), "Stacked tensor shape does not match original tensor"
-
-        return x_single_frame_stacked
-
     def pseudo_3d_pos_embedding(self, conv_t, conv_h, conv_w, random_t: int):
         """
         Generates a pseudo-3D positional embedding by reshaping and stacking a 2D positional embedding.
@@ -131,7 +98,11 @@ class VisionTransformer(nn.Module):
             Updates `self.stacked_pos_embedding` with the reshaped and stacked positional embedding.
         """
         pos_emb_reshape = rearrange(
-            self.pos_embedding, "b (t h w) e -> b e t h w", t=conv_t, h=conv_h, w=conv_w
+            self.pos_embedding,
+            "b (t h w) e -> b e t h w",
+            t=conv_t,
+            h=conv_h,
+            w=conv_w,
         )
 
         single_pos_embedding_slice = pos_emb_reshape[:, :, random_t, :, :]
@@ -155,37 +126,36 @@ class VisionTransformer(nn.Module):
     def forward_vit(
         self,
         x: torch.Tensor,
+        x_stacked: Optional[torch.Tensor] = None,
+        random_t: int = 0,
         attention_mask: Optional[torch.Tensor] = None,
         patch_embed_only: bool = False,
         static_scene_temporal_reasoning: bool = False,
         use_static_positional_embedding: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
-        if isinstance(x, list):
-            x = x[0]
         # Obtain patch embeddings from the input tensor
-        x_embed, _, _, t, h, w = self.patch_embed(x)  # (batch, num_patches, embed_dim)
+        x_embed = self.patch_embed(x)  # (batch, num_patches, embed_dim)
 
-        if static_scene_temporal_reasoning:
-            _, _, original_t, _, _ = x.shape
-            random_t = torch.randint(0, original_t, (1,)).item()
-            random_pos_embedding_t = random_t // self.tubelet_size
-
-            x_stacked: torch.Tensor = self.pseudo_3d_tensor(
-                x=x, random_t=random_t, original_t=original_t
-            )
-            x_stacked, _, _, _, _, _ = self.patch_embed(x_stacked)
+        if static_scene_temporal_reasoning and x_stacked is not None:
+            x_stacked = self.patch_embed(x_stacked)
 
             self.pseudo_3d_pos_embedding(
-                conv_t=t, conv_h=h, conv_w=w, random_t=random_pos_embedding_t
+                conv_t=self.num_frames // self.tubelet_size,
+                conv_h=self.img_size[0] // self.patch_size[0],
+                conv_w=self.img_size[1] // self.patch_size[1],
+                random_t=random_t,
             )
             x_stacked = x_stacked + self.stacked_pos_embedding
             x_stacked = self.post_emb_norm_vit(x_stacked)
-            x_stacked = self.encoder(x_stacked, attn_mask=attention_mask)
-            x_stacked = self.post_enc_norm_vit(x_stacked)
 
         if use_static_positional_embedding:
-            self.pseudo_3d_pos_embedding(conv_t=t, conv_h=h, conv_w=w, random_t=0)
+            self.pseudo_3d_pos_embedding(
+                conv_t=self.num_frames // self.tubelet_size,
+                conv_h=self.img_size[0] // self.patch_size[0],
+                conv_w=self.img_size[1] // self.patch_size[1],
+                random_t=random_t,
+            )
             x_embed = x_embed + self.stacked_pos_embedding
         else:
             # Add positional embeddings to the patch embeddings
@@ -199,7 +169,6 @@ class VisionTransformer(nn.Module):
                 return x_embed, x_stacked
             else:
                 return x_embed
-
         # Encode the patch embeddings using the student encoder
         x_embed = self.encoder(
             x_embed, attn_mask=attention_mask

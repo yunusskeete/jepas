@@ -14,7 +14,7 @@ from model import VJEPA
 if __name__ == "__main__":
 
     dataset_path: Path = Path(
-        "E:/ahmad/kinetics-dataset/smaller"
+        "E:/ahmad/kinetics-dataset/vsmall"
     ).resolve()  # Path to Kinetics dataset
 
     dataset_videos = VideoDataModule(

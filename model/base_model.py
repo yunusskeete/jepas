@@ -187,6 +187,39 @@ class JEPA_base(VisionTransformer):
 
         return prediction_blocks
 
+    def pseudo_3d_tensor(
+        self, x: torch.Tensor, random_t: int, original_t: int
+    ) -> torch.Tensor:
+        """
+        Extracts a single frame from a 3D tensor and stacks it across the time dimension.
+
+        Args:
+            x (torch.Tensor): Input tensor with shape `[batch_size, channels, time, height, width]`.
+            random_t (int): Time index to select a frame from the tensor.
+
+        Raises:
+            AssertionError: If the extracted frame does not match the original tensor slice or if the stacked tensor shape is incorrect.
+
+        Returns:
+            torch.Tensor: The extracted frame stacked across the time dimension.
+        """
+        x_single_frame = x[:, :, random_t, :, :]
+        print(f"{x_single_frame.shape=}")
+
+        assert torch.equal(
+            x_single_frame, x[:, :, random_t, :, :]
+        ), "single frame not equal to frame in tensor"
+
+        x_single_frame_stacked = x_single_frame.unsqueeze(2).expand(
+            -1, -1, original_t, -1, -1
+        )
+
+        assert (
+            x_single_frame_stacked.shape == x.shape
+        ), "Stacked tensor shape does not match original tensor"
+
+        return x_single_frame_stacked
+
     def forward_base(
         self,
         x: torch.Tensor,
@@ -194,6 +227,7 @@ class JEPA_base(VisionTransformer):
         context_patches: List[int],
         static_scene_temporal_reasoning: bool = False,
         use_static_positional_embedding: bool = False,
+        random_t: int = 0,
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         """
         (Image/video invariant)
@@ -222,10 +256,25 @@ class JEPA_base(VisionTransformer):
 
         NOTE: Positional encoding applied to `x` during `self.forward_vit()`
         """
+
+        if isinstance(x, list):
+            x = x[0]
+        _, _, original_t, _, _ = x.shape
+        random_t = random_t if test_mode else torch.randint(0, original_t, (1,)).item()
         output = self.forward_vit(
             x=x,
+            x_stacked=(
+                None
+                if static_scene_temporal_reasoning is False
+                else self.pseudo_3d_tensor(
+                    x=x,
+                    random_t=random_t,
+                    original_t=original_t,
+                )
+            ),
+            random_t=random_t if test_mode else (random_t // self.tubelet_size),
             attention_mask=None,
-            patch_embed_only=test_mode,
+            patch_embed_only=not test_mode,
             static_scene_temporal_reasoning=static_scene_temporal_reasoning,
             use_static_positional_embedding=use_static_positional_embedding,
         )

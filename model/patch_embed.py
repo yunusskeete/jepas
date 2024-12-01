@@ -120,7 +120,7 @@ class PatchEmbed3D(nn.Module):
         img_size: int | Tuple[int, int] = 224,
         num_frames: int = 16,
         patch_size: int | Tuple[int, int] = 16,
-        tubelet_size: int = 2,  # Temporal dimension
+        tubelet_size: int = 4,  # Temporal dimension
         in_chans: int = 3,
         embed_dim: int = 64,
     ):
@@ -166,8 +166,7 @@ class PatchEmbed3D(nn.Module):
         # Apply the convolutional layer to get patches
         x = self.conv(x)
 
-        batch_size, embed_dim, t, h, w = x.shape
         # Flatten the patches into a sequence
         x = rearrange(x, "b e t h w -> b (t h w) e")
 
-        return x, batch_size, embed_dim, t, h, w  # (b n e)
+        return x  # (b n e)
