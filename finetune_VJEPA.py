@@ -202,7 +202,7 @@ class VJEPA_FT(pl.LightningModule):
 
 def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx):
     # Create folder structure with unique folder names
-    if batch_idx % 1000 != 0:
+    if batch_idx % 5000 != 0:
         return
 
     base_folder = f"{folder_name}/{batch_idx}"
@@ -276,7 +276,7 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
 if __name__ == "__main__":
 
     torch.cuda.empty_cache()
-    dataset: Path = Path("E:/ahmad/kinetics-dataset/vsmall").resolve()
+    dataset: Path = Path("E:/ahmad/kinetics-dataset/k400").resolve()
 
     img_size: int = 224
     frame_count: int = 8
@@ -287,6 +287,7 @@ if __name__ == "__main__":
         frames_per_clip=frame_count,
         pin_memory=True,
         prefetch_factor=2,
+        frame_step=8,
     )
 
     model = VJEPA_FT(
