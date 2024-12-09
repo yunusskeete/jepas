@@ -1,0 +1,11 @@
+pytorch-lightning
+pillow
+decord
+scikit-image
+opencv-python
+x-transformers
+transformers
+torch
+torchvision
+torchaudio
+-f https://download.pytorch.org/whl/cu118

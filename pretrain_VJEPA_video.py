@@ -40,8 +40,8 @@ if __name__ == "__main__":
 
     # Path to the checkpoint to resume from (use the latest checkpoint if available)
     checkpoint_path: Optional[str] = (
-        "D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/images/version_4/checkpoints/epoch=2-step=76500.ckpt"
-        # None
+        # "D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/images/version_4/checkpoints/epoch=2-step=76500.ckpt"
+        None
     )
 
     model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
