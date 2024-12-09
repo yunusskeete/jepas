@@ -14,12 +14,12 @@ from model import VJEPA
 if __name__ == "__main__":
 
     dataset_path: Path = Path(
-        "E:/ahmad/kinetics-dataset/vsmall"
+        "E:/ahmad/kinetics-dataset/smaller"
     ).resolve()  # Path to Kinetics dataset
 
     dataset_videos = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=1,
+        batch_size=2,
         frames_per_clip=8,
         pin_memory=True,
         prefetch_factor=2,
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         accelerator="gpu",
         devices=1,
         # precision="16-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
-        max_epochs=1,
+        max_epochs=3,
         gradient_clip_val=0.1,
         callbacks=[lr_monitor, model_summary],
         logger=logger,

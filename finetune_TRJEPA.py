@@ -65,6 +65,8 @@ class VJEPA_FT(pl.LightningModule):
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "static_scene"
         self.pretrained_model.layer_dropout = self.drop_path
+        self.pretrained_model.m = 1
+        self.pretrained_model.momentum_limits = (1.0, 1.0)
         self.average_pool = nn.AvgPool1d((self.pretrained_model.embed_dim), stride=1)
 
         self.mlp_head = nn.Sequential(
@@ -113,13 +115,14 @@ class VJEPA_FT(pl.LightningModule):
             context_aspect_ratio=self.context_aspect_ratio,
             context_scale=self.context_scale,
             static_scene_temporal_reasoning=False,
-            use_static_positional_embedding=False,
+            use_static_positional_embedding=True,
             random_t=random_t,
         )
         print(f"SHAPE BEFORE MLP: {x.shape=}")
         # x = self.average_pool(x)  # conduct average pool like in paper
         # # new shape = [batch_size, num_patches, 1]
         # x = x.squeeze(-1)  # [batch_size, num_patches]
+        # x = self.pretrained_model.predictor.decoder(x)
         x = self.mlp_head(
             x
         )  # [batch_size, output_channels, frame_count, output_height, output_width]
@@ -128,52 +131,70 @@ class VJEPA_FT(pl.LightningModule):
         return x
 
     def training_step(self, batch, batch_idx):
-        y = batch[0]
-        x = y[:, :, 0:1, :, :]
-        stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
-        print(f"{stacked_img.shape=}")
-        y_hat = self(x=stacked_img, random_t=0)
-        print(f"{y_hat.shape=}")
-        print(f"{y.shape=}")
-        save_frames_to_folder(
-            video_tensor=y_hat,
-            original_tensor=y,
-            folder_name="finetune1/static",
-            batch_idx=batch_idx,
-        )
-        loss = self.criterion(y_hat, y)  # calculate loss
-        accuracy = (
-            (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
-        )  # calculate accuracy
-        self.log("train_accuracy", accuracy)
-        self.log("train_loss", loss)
-        print("train_accuracy", accuracy)
-        print("train_loss", loss)
-        return loss
+        clip: torch.Tensor
+        running_loss = 0.0
+        running_accuracy = 0.0
+        for clip in batch:
+            y = clip
+            x = y[:, :, 0:1, :, :]
+            stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
+            print(f"{stacked_img.shape=}")
+            y_hat = self(x=stacked_img, random_t=0)
+            print(f"{y_hat.shape=}")
+            print(f"{y.shape=}")
+            save_frames_to_folder(
+                video_tensor=y_hat,
+                original_tensor=y,
+                folder_name="finetune/static",
+                batch_idx=batch_idx,
+            )
+            loss = self.criterion(y_hat, y)  # calculate loss
+            accuracy = (
+                (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
+            )  # calculate accuracy
+            running_loss += loss
+            running_accuracy += accuracy
+
+        running_accuracy /= len(batch)
+        running_loss /= len(batch)
+        self.log("train_accuracy", running_accuracy)
+        self.log("train_loss", running_loss)
+        print("train_accuracy", running_accuracy)
+        print("train_loss", running_loss)
+        return running_loss
 
     def validation_step(self, batch, batch_idx):
-        y = batch[0]
-        x = y[:, :, 0:1, :, :]
-        stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
-        print(f"{stacked_img.shape=}")
-        y_hat = self(x=stacked_img, random_t=0)
-        print(f"{y_hat.shape=}")
-        print(f"{y.shape=}")
-        save_frames_to_folder(
-            video_tensor=y_hat,
-            original_tensor=y,
-            folder_name="finetune1/static",
-            batch_idx=batch_idx,
-        )
-        loss = self.criterion(y_hat, y)  # calculate loss
-        accuracy = (
-            (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
-        )  # calculate accuracy
-        self.log("val_accuracy", accuracy)
-        self.log("val_loss", loss)
-        print("val_accuracy", accuracy)
-        print("val_loss", loss)
-        return loss
+        clip: torch.Tensor
+        running_loss = 0.0
+        running_accuracy = 0.0
+        for clip in batch:
+            y = clip
+            x = y[:, :, 0:1, :, :]
+            stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
+            print(f"{stacked_img.shape=}")
+            y_hat = self(x=stacked_img, random_t=0)
+            print(f"{y_hat.shape=}")
+            print(f"{y.shape=}")
+            save_frames_to_folder(
+                video_tensor=y_hat,
+                original_tensor=y,
+                folder_name="finetune/static",
+                batch_idx=batch_idx,
+            )
+            loss = self.criterion(y_hat, y)  # calculate loss
+            accuracy = (
+                (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
+            )  # calculate accuracy
+            running_loss += loss
+            running_accuracy += accuracy
+
+        running_accuracy /= len(batch)
+        running_loss /= len(batch)
+        self.log("train_accuracy", running_accuracy)
+        self.log("train_loss", running_loss)
+        print("train_accuracy", running_accuracy)
+        print("train_loss", running_loss)
+        return running_loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
@@ -184,6 +205,9 @@ class VJEPA_FT(pl.LightningModule):
 
 def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx):
     # Create folder structure with unique folder names
+    if batch_idx % 5000 != 0:
+        return
+
     base_folder = f"{folder_name}/{batch_idx}"
     pred_folder = os.path.join(base_folder, "pred")
     target_folder = os.path.join(base_folder, "target")
@@ -204,6 +228,10 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
         video_tensor.shape[1]
     ):  # target_tensor.shape[1] is the number of frames
         # Extract frames from target and original tensors
+        if video_tensor.dim() == 5:
+            video_tensor = video_tensor[0]
+        if original_tensor.dim() == 5:
+            original_tensor = original_tensor[0]
         target_frame = video_tensor[:, i, :, :]  # Shape [3, height, width]
         original_frame = original_tensor[:, i, :, :]  # Shape [3, height, width]
 
@@ -258,7 +286,7 @@ if __name__ == "__main__":
 
     dataset_module = VideoDataModule(
         dataset_path=dataset,
-        batch_size=1,
+        batch_size=2,
         frames_per_clip=frame_count,
         pin_memory=True,
         prefetch_factor=2,
@@ -281,7 +309,7 @@ if __name__ == "__main__":
     )
 
     trainer = pl.Trainer(
-        accelerator="cpu",
+        accelerator="gpu",
         devices=1,
         max_epochs=3,
         callbacks=[lr_monitor, model_summary],
