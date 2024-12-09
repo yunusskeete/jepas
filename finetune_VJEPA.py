@@ -128,48 +128,70 @@ class VJEPA_FT(pl.LightningModule):
         return x
 
     def training_step(self, batch, batch_idx):
-        y = batch[0]
-        print(f"{y.shape=}")
-        y_hat = self(x=y, random_t=0)
-        print(f"{y_hat.shape=}")
-        print(f"{y.shape=}")
-        save_frames_to_folder(
-            video_tensor=y_hat,
-            original_tensor=y,
-            folder_name="finetune1/videos",
-            batch_idx=batch_idx,
-        )
-        loss = self.criterion(y_hat, y)  # calculate loss
-        accuracy = (
-            (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
-        )  # calculate accuracy
-        self.log("train_accuracy", accuracy)
-        self.log("train_loss", loss)
-        print("train_accuracy", accuracy)
-        print("train_loss", loss)
-        return loss
+        clip: torch.Tensor
+        running_loss = 0.0
+        running_accuracy = 0.0
+        for clip in batch:
+            y = clip
+            x = y[:, :, 0:1, :, :]
+            stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
+            print(f"{stacked_img.shape=}")
+            y_hat = self(x=stacked_img, random_t=0)
+            print(f"{y_hat.shape=}")
+            print(f"{y.shape=}")
+            save_frames_to_folder(
+                video_tensor=y_hat,
+                original_tensor=y,
+                folder_name="finetune/video",
+                batch_idx=batch_idx,
+            )
+            loss = self.criterion(y_hat, y)  # calculate loss
+            accuracy = (
+                (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
+            )  # calculate accuracy
+            running_loss += loss
+            running_accuracy += accuracy
+
+        running_accuracy /= len(batch)
+        running_loss /= len(batch)
+        self.log("train_accuracy", running_accuracy)
+        self.log("train_loss", running_loss)
+        print("train_accuracy", running_accuracy)
+        print("train_loss", running_loss)
+        return running_loss
 
     def validation_step(self, batch, batch_idx):
-        y = batch[0]
-        print(f"{y.shape=}")
-        y_hat = self(x=y, random_t=0)
-        print(f"{y_hat.shape=}")
-        print(f"{y.shape=}")
-        save_frames_to_folder(
-            video_tensor=y_hat,
-            original_tensor=y,
-            folder_name="finetune1/videos",
-            batch_idx=batch_idx,
-        )
-        loss = self.criterion(y_hat, y)  # calculate loss
-        accuracy = (
-            (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
-        )  # calculate accuracy
-        self.log("val_accuracy", accuracy)
-        self.log("val_loss", loss)
-        print("val_accuracy", accuracy)
-        print("val_loss", loss)
-        return loss
+        clip: torch.Tensor
+        running_loss = 0.0
+        running_accuracy = 0.0
+        for clip in batch:
+            y = clip
+            x = y[:, :, 0:1, :, :]
+            stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
+            print(f"{stacked_img.shape=}")
+            y_hat = self(x=stacked_img, random_t=0)
+            print(f"{y_hat.shape=}")
+            print(f"{y.shape=}")
+            save_frames_to_folder(
+                video_tensor=y_hat,
+                original_tensor=y,
+                folder_name="finetune/video",
+                batch_idx=batch_idx,
+            )
+            loss = self.criterion(y_hat, y)  # calculate loss
+            accuracy = (
+                (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
+            )  # calculate accuracy
+            running_loss += loss
+            running_accuracy += accuracy
+
+        running_accuracy /= len(batch)
+        running_loss /= len(batch)
+        self.log("val_accuracy", running_accuracy)
+        self.log("val_loss", running_loss)
+        print("val_accuracy", running_accuracy)
+        print("val_loss", running_loss)
+        return running_loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
@@ -180,6 +202,9 @@ class VJEPA_FT(pl.LightningModule):
 
 def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx):
     # Create folder structure with unique folder names
+    if batch_idx % 5000 != 0:
+        return
+
     base_folder = f"{folder_name}/{batch_idx}"
     pred_folder = os.path.join(base_folder, "pred")
     target_folder = os.path.join(base_folder, "target")
@@ -200,6 +225,10 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
         video_tensor.shape[1]
     ):  # target_tensor.shape[1] is the number of frames
         # Extract frames from target and original tensors
+        if video_tensor.dim() == 5:
+            video_tensor = video_tensor[0]
+        if original_tensor.dim() == 5:
+            original_tensor = original_tensor[0]
         target_frame = video_tensor[:, i, :, :]  # Shape [3, height, width]
         original_frame = original_tensor[:, i, :, :]  # Shape [3, height, width]
 
@@ -247,21 +276,22 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
 if __name__ == "__main__":
 
     torch.cuda.empty_cache()
-    dataset: Path = Path("E:/ahmad/kinetics-dataset/vsmall").resolve()
+    dataset: Path = Path("E:/ahmad/kinetics-dataset/k400").resolve()
 
     img_size: int = 224
     frame_count: int = 8
 
     dataset_module = VideoDataModule(
         dataset_path=dataset,
-        batch_size=1,
+        batch_size=2,
         frames_per_clip=frame_count,
         pin_memory=True,
         prefetch_factor=2,
+        frame_step=8,
     )
 
     model = VJEPA_FT(
-        pretrained_model_path="D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_0/checkpoints/epoch=0-step=21000.ckpt",
+        pretrained_model_path="D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_1/checkpoints/epoch=1-step=241258.ckpt",
         frame_count=frame_count,
         output_channels=3,
         output_height=img_size,
@@ -277,9 +307,9 @@ if __name__ == "__main__":
     )
 
     trainer = pl.Trainer(
-        accelerator="cpu",
+        accelerator="gpu",
         devices=1,
-        max_epochs=1,
+        max_epochs=3,
         callbacks=[lr_monitor, model_summary],
         logger=logger,
         gradient_clip_val=0.1,
