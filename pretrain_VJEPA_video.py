@@ -44,7 +44,8 @@ if __name__ == "__main__":
         None
     )
 
-    model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
+    if checkpoint_path is not None:
+        model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
 
     print("STARTING VIDEOS")
 

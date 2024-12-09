@@ -5,6 +5,7 @@ scikit-image
 opencv-python
 x-transformers
 transformers
+tensorboard
 torch
 torchvision
 torchaudio
