@@ -1,22 +1,18 @@
 # pylint: disable=no-value-for-parameter
 import os
 from pathlib import Path
-from PIL import Image
 
 import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+from PIL import Image
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelSummary
 from pytorch_lightning.loggers import TensorBoardLogger
 
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import (
-    LearningRateMonitor,
-    ModelSummary,
-)
 from jepa_datasets import VideoDataModule
-
-from utils.types import Number
 from pretrain_VJEPA_static_scene import VJEPA
+from utils.types import Number
 
 
 class LambdaLayer(nn.Module):
@@ -61,7 +57,9 @@ class VJEPA_FT(pl.LightningModule):
         self.patch_size = (6, 16, 16)
 
         # Load the pretrained IJEPA model for video-based architecture
-        self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
+        self.pretrained_model = VJEPA.load_from_checkpoint(
+            self.pretrained_model_path, strict=False
+        )
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "static_scene"
         self.pretrained_model.layer_dropout = self.drop_path
@@ -251,21 +249,27 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
 if __name__ == "__main__":
 
     torch.cuda.empty_cache()
-    dataset: Path = Path("E:/ahmad/kinetics-dataset/k400").resolve()
+
+    dataset_path: Path = Path(
+        "/mnt/data/video/kinetics-dataset/k400"
+    ).resolve()  # Path to Kinetics dataset
 
     img_size: int = 224
-    frame_count: int = 8
+    frame_count: int = 16
 
-    dataset_module = VideoDataModule(
-        dataset_path=dataset,
+    dataset = VideoDataModule(
+        dataset_path=dataset_path,
+        # batch_size=16,
         batch_size=1,
         frames_per_clip=frame_count,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=4,
     )
 
     model = VJEPA_FT(
-        pretrained_model_path="D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_2/checkpoints/epoch=2-step=723774.ckpt",
+        # lr=1e-4,
+        lr=1e-3,
+        pretrained_model_path="/home/yunusskeete/Downloads/version_2/checkpoints/epoch=2-step=723774.ckpt",
         frame_count=frame_count,
         output_channels=3,
         output_height=img_size,
@@ -281,7 +285,8 @@ if __name__ == "__main__":
     )
 
     trainer = pl.Trainer(
-        accelerator="cpu",
+        # accelerator="cpu",
+        accelerator="gpu",
         devices=1,
         max_epochs=3,
         callbacks=[lr_monitor, model_summary],
@@ -289,4 +294,4 @@ if __name__ == "__main__":
         gradient_clip_val=0.1,
     )
 
-    trainer.fit(model, dataset_module)
+    trainer.fit(model, dataset)
