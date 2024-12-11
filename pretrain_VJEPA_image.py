@@ -19,10 +19,13 @@ if __name__ == "__main__":
 
     dataset_videos = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=2,
+        batch_size=4,
         frames_per_clip=8,
+        frame_step=8,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=4,
+        num_clips=-1,
+        num_workers=4,
     )
 
     model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)

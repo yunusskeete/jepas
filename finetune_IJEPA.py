@@ -2,7 +2,6 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from pretrain_IJEPA import IJEPA
 from pytorch_lightning.callbacks import (
     LearningRateMonitor,
     ModelCheckpoint,
@@ -12,6 +11,7 @@ from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader, Dataset
 
 from model import IJEPA_base
+from pretrain_IJEPA import IJEPA
 
 """Dummy Dataset"""
 

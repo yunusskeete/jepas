@@ -1,8 +1,8 @@
 from pathlib import Path
 from typing import Optional
 
-import torch
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.callbacks import (  # ModelCheckpoint,
     LearningRateMonitor,
     ModelSummary,
@@ -15,16 +15,17 @@ from model import VJEPA
 if __name__ == "__main__":
 
     dataset_path: Path = Path(
-        "E:/ahmad/kinetics-dataset/k400"
+        "/mnt/data/video/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
     dataset_videos = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=2,
+        batch_size=16,
         frames_per_clip=8,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=4,
         frame_step=8,
+        # num_clips=8,
     )
 
     model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)

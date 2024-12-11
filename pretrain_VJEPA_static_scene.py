@@ -12,20 +12,24 @@ from jepa_datasets import VideoDataModule
 from model import VJEPA
 
 if __name__ == "__main__":
+    import time
+
+    time.sleep(60 * 20)
 
     dataset_path: Path = Path(
-        "E:/ahmad/kinetics-dataset/k400"
+        "/mnt/data/video/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
     dataset_videos = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=1,
+        batch_size=16,
         frames_per_clip=8,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=4,
+        frame_step=8,
     )
 
-    model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)
+    model = VJEPA(lr=5e-4, num_frames=dataset_videos.frames_per_clip)
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
@@ -38,9 +42,19 @@ if __name__ == "__main__":
 
     # Path to the checkpoint to resume from (use the latest checkpoint if available)
     checkpoint_path: Optional[str] = (
-        "D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_0/checkpoints/epoch=0-step=21000.ckpt"
+        "lightning_logs/v-jepa/pretrain/videos/version_3/checkpoints/epoch=1-step=30156.ckpt"
         # None
     )
+    checkpoint_paths: Path = Path(
+        "lightning_logs/v-jepa/pretrain/videos/version_3/checkpoints"
+    )
+    assert checkpoint_paths.exists, f"Checkpoints do not exist: '{checkpoint_paths}'"
+
+    checkpoint: Path = [
+        path for path in checkpoint_paths.glob("*.ckpt") if "epoch=2" in path.name
+    ][0]
+    assert checkpoint.exists, f"Checkpoint does not exist: '{checkpoint}'"
+    checkpoint_path = str(checkpoint)
 
     model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
 

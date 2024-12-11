@@ -287,17 +287,18 @@ if __name__ == "__main__":
 
     dataset = VideoDataModule(
         dataset_path=dataset_path,
-        # batch_size=16,
-        batch_size=1,
+        batch_size=16,
+        # batch_size=1,
         frames_per_clip=frame_count,
+        frame_step=8,
         pin_memory=True,
         prefetch_factor=4,
     )
 
     model = VJEPA_FT(
-        # lr=1e-4,
-        lr=1e-3,
-        pretrained_model_path="/home/yunusskeete/Downloads/version_2/checkpoints/epoch=2-step=723774.ckpt",
+        lr=1e-4,
+        # lr=1e-3,
+        # pretrained_model_path="/home/yunusskeete/Downloads/version_2/checkpoints/epoch=2-step=723774.ckpt",
         frame_count=frame_count,
         output_channels=3,
         output_height=img_size,
