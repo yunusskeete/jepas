@@ -1,8 +1,10 @@
 import copy
+import os
 from typing import Any, List, Literal, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from utils.types import Number
 
@@ -424,3 +426,16 @@ class JEPA_base(VisionTransformer):
             List[int]: A list of patch indices for the context block excluding target patches.
         """
         raise NotImplementedError()
+
+    @rank_zero_only
+    def save_mid_epoch_checkpoint(self, batch_idx):
+        """Saves a mid-epoch checkpoint."""
+        checkpoint_dir = os.path.join(
+            self.trainer.default_root_dir, "mid_epoch_checkpoints"
+        )
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        new_checkpoint_path: str = os.path.join(
+            checkpoint_dir, f"checkpoint_batch_{batch_idx}.ckpt"
+        )
+        self.trainer.save_checkpoint(new_checkpoint_path)
+        print(f"Saved checkpoint at {new_checkpoint_path}")

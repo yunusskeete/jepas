@@ -11,5 +11,6 @@ JEPA.drawio
 .$JEPA.drawio.bkp
 *.ipynb
 !t.ipynb
-finetune/*
-profiling/*
+finetune/
+profiling/
+mid_epoch_checkpoints/

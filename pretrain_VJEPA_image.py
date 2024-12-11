@@ -49,6 +49,8 @@ if __name__ == "__main__":
         None
     )
 
+    mid_epoch_checkpoint_path: Optional[str] = None
+
     if checkpoint_path is not None:
         model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
 
@@ -66,7 +68,7 @@ if __name__ == "__main__":
     model.phase = "images"
 
     trainer_images.fit(
-        model,
-        dataset_videos,
-        ckpt_path=checkpoint_path,
+        model=model,
+        datamodule=dataset_videos,
+        ckpt_path=mid_epoch_checkpoint_path,
     )

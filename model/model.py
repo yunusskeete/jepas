@@ -539,6 +539,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         momentum_limits: Tuple[float, float] = (0.996, 1.0),
         num_frames: int = 8,
         testing_purposes_only: bool = False,
+        mid_epoch_savepoint: int = 10000,
         **kwargs,
     ):
         pl.LightningModule.__init__(self)
@@ -555,6 +556,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         # Define hyperparameters
         self.lr = lr
         self.weight_decay = weight_decay
+        self.mid_epoch_savepoint = mid_epoch_savepoint
         self.phase = "videos"
         self.m = m  # momentum
         self.target_aspect_ratio = target_aspect_ratio
@@ -1011,6 +1013,10 @@ class VJEPA(JEPA_base, pl.LightningModule):
         torch.Tensor
             The aggregated loss for the batch.
         """
+        # Save a checkpoint every N batches (e.g., every 100 batches)
+        if batch_idx % self.mid_epoch_savepoint == 0:
+            self.save_mid_epoch_checkpoint(batch_idx)
+
         if self.phase == "images":
             # Logic for the first dataset (e.g., image clips)
             return self.training_step_images(batch, batch_idx)

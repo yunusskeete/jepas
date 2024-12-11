@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 from PIL import Image
+from typing import Optional
 
 import numpy as np
 import torch
@@ -164,6 +165,11 @@ class VJEPA_FT(pl.LightningModule):
         self.log("train_loss", running_loss)
         print("train_accuracy", running_accuracy)
         print("train_loss", running_loss)
+
+        # Save a checkpoint every N batches (e.g., every 100 batches)
+        if batch_idx % self.pretrained_model.mid_epoch_savepoint == 0:
+            self.pretrained_model.save_mid_epoch_checkpoint(batch_idx)
+
         return running_loss
 
     def validation_step(self, batch, batch_idx):
@@ -294,6 +300,11 @@ if __name__ == "__main__":
         num_clips=2,
     )
 
+    mid_epoch_checkpoint_path: Optional[str] = (
+        "D:/MDX/Thesis/new-jepa/jepa/mid_epoch_checkpoints/checkpoint_batch_1600.ckpt"
+        # None
+    )
+
     model = VJEPA_FT(
         pretrained_model_path="D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_1/checkpoints/epoch=1-step=241258.ckpt",
         frame_count=frame_count,
@@ -320,4 +331,6 @@ if __name__ == "__main__":
         profiler="advanced",
     )
 
-    trainer.fit(model, dataset_module)
+    trainer.fit(
+        model=model, datamodule=dataset_module, ckpt_path=mid_epoch_checkpoint_path
+    )
