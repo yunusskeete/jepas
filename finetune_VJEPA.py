@@ -66,7 +66,15 @@ class VJEPA_FT(pl.LightningModule):
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "videos"
         self.pretrained_model.layer_dropout = self.drop_path
-        self.average_pool = nn.AvgPool1d((self.pretrained_model.embed_dim), stride=1)
+
+        # Freeze all parameters in the pretrained model (backbone)
+        for param in self.pretrained_model.parameters():
+            param.requires_grad = False  # Freeze the pretrained model's parameters
+
+        self.temporal_attention = nn.MultiheadAttention(
+            embed_dim=self.pretrained_model.embed_dim,
+            num_heads=8,  # or suitable number of heads
+        )
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(self.pretrained_model.embed_dim),
@@ -81,32 +89,36 @@ class VJEPA_FT(pl.LightningModule):
                     self.pretrained_model.img_size[1]
                     // self.pretrained_model.patch_size[1],
                 ),
-            ),  # Reshape into patches
+            ),
             LambdaLayer(lambda x: x.permute(0, 4, 1, 2, 3)),
-            # nn.Upsample(scale_factor=(2, 2, 2), mode="trilinear", align_corners=True),
             nn.ReLU(),
+            nn.Conv3d(
+                in_channels=np.prod(self.patch_size),
+                out_channels=np.prod(self.patch_size),
+                kernel_size=(3, 1, 1),
+                stride=(1, 1, 1),
+                padding=(1, 0, 0),  # Temporal padding
+            ),  # Temporal convolution
             nn.ConvTranspose3d(
-                in_channels=np.prod(
-                    self.patch_size
-                ),  # Input channels (from the patch size)
-                out_channels=3,  # RGB output
+                in_channels=np.prod(self.patch_size),
+                out_channels=3,
                 kernel_size=(
                     self.pretrained_model.tubelet_size,
                     self.pretrained_model.patch_size[0],
                     self.pretrained_model.patch_size[1],
-                ),  # Same as the Conv3D kernel
+                ),
                 stride=(
                     self.pretrained_model.tubelet_size,
                     self.pretrained_model.patch_size[0],
                     self.pretrained_model.patch_size[1],
-                ),  # Same stride as Conv3D
+                ),
             ),
         )
 
         # define loss
         self.criterion = nn.MSELoss()
 
-    def forward(self, x, random_t):
+    def forward(self, x):
         x = self.pretrained_model(
             x=x,
             target_aspect_ratio=self.target_aspect_ratio,
@@ -117,11 +129,9 @@ class VJEPA_FT(pl.LightningModule):
             use_static_positional_embedding=False,
         )
         print(f"SHAPE BEFORE MLP: {x.shape=}")
-        # x = self.average_pool(x)  # conduct average pool like in paper
-        # # new shape = [batch_size, num_patches, 1]
-        # x = x.squeeze(-1)  # [batch_size, num_patches]
+        temporal_output, _ = self.temporal_attention(x, x, x)
         x = self.mlp_head(
-            x
+            temporal_output
         )  # [batch_size, output_channels, frame_count, output_height, output_width]
         print(f"SHAPE AFTER MLP: {x.shape=}")
 
@@ -132,22 +142,18 @@ class VJEPA_FT(pl.LightningModule):
         running_loss = 0.0
         running_accuracy = 0.0
         for clip in batch:
-            y = clip
-            x = y[:, :, 0:1, :, :]
-            stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
-            print(f"{stacked_img.shape=}")
-            y_hat = self(x=stacked_img, random_t=0)
+            print(f"{clip.shape=}")
+            y_hat = self(x=clip)
             print(f"{y_hat.shape=}")
-            print(f"{y.shape=}")
             save_frames_to_folder(
                 video_tensor=y_hat,
-                original_tensor=y,
+                original_tensor=clip,
                 folder_name="finetune/video",
                 batch_idx=batch_idx,
             )
-            loss = self.criterion(y_hat, y)  # calculate loss
+            loss = self.criterion(y_hat, clip)  # calculate loss
             accuracy = (
-                (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
+                (y_hat.argmax(dim=1) == clip.argmax(dim=1)).float().mean()
             )  # calculate accuracy
             running_loss += loss
             running_accuracy += accuracy
@@ -165,22 +171,17 @@ class VJEPA_FT(pl.LightningModule):
         running_loss = 0.0
         running_accuracy = 0.0
         for clip in batch:
-            y = clip
-            x = y[:, :, 0:1, :, :]
-            stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
-            print(f"{stacked_img.shape=}")
-            y_hat = self(x=stacked_img, random_t=0)
+            y_hat = self(x=clip)
             print(f"{y_hat.shape=}")
-            print(f"{y.shape=}")
             save_frames_to_folder(
                 video_tensor=y_hat,
-                original_tensor=y,
+                original_tensor=clip,
                 folder_name="finetune/video",
                 batch_idx=batch_idx,
             )
-            loss = self.criterion(y_hat, y)  # calculate loss
+            loss = self.criterion(y_hat, clip)  # calculate loss
             accuracy = (
-                (y_hat.argmax(dim=1) == y.argmax(dim=1)).float().mean()
+                (y_hat.argmax(dim=1) == clip.argmax(dim=1)).float().mean()
             )  # calculate accuracy
             running_loss += loss
             running_accuracy += accuracy
@@ -275,6 +276,7 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
 
 if __name__ == "__main__":
 
+    torch.set_float32_matmul_precision("medium")
     torch.cuda.empty_cache()
     dataset: Path = Path("E:/ahmad/kinetics-dataset/k400").resolve()
 
@@ -285,9 +287,11 @@ if __name__ == "__main__":
         dataset_path=dataset,
         batch_size=2,
         frames_per_clip=frame_count,
+        num_workers=os.cpu_count() // 2,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=4,
         frame_step=8,
+        num_clips=2,
     )
 
     model = VJEPA_FT(
@@ -313,6 +317,7 @@ if __name__ == "__main__":
         callbacks=[lr_monitor, model_summary],
         logger=logger,
         gradient_clip_val=0.1,
+        profiler="advanced",
     )
 
     trainer.fit(model, dataset_module)

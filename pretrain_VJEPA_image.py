@@ -1,6 +1,8 @@
+import os
 from pathlib import Path
 from typing import Optional
 
+import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (  # ModelCheckpoint,
     LearningRateMonitor,
@@ -13,6 +15,8 @@ from model import VJEPA
 
 if __name__ == "__main__":
 
+    torch.set_float32_matmul_precision("medium")
+
     dataset_path: Path = Path(
         "E:/ahmad/kinetics-dataset/smaller"
     ).resolve()  # Path to Kinetics dataset
@@ -21,8 +25,11 @@ if __name__ == "__main__":
         dataset_path=dataset_path,
         batch_size=2,
         frames_per_clip=8,
+        num_workers=os.cpu_count() // 2,
         pin_memory=True,
         prefetch_factor=2,
+        frame_step=8,
+        num_clips=-1,
     )
 
     model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)
@@ -42,12 +49,14 @@ if __name__ == "__main__":
         None
     )
 
+    if checkpoint_path is not None:
+        model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
+
     print("STARTING IMAGES")
 
     trainer_images = pl.Trainer(
         accelerator="gpu",
         devices=1,
-        # precision="16-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
         max_epochs=3,
         gradient_clip_val=0.1,
         callbacks=[lr_monitor, model_summary],

@@ -1,4 +1,5 @@
 import datetime
+import os
 from pathlib import Path
 
 import torch
@@ -6,6 +7,7 @@ import torch.profiler
 from torch.utils.data import DataLoader
 
 from jepa_datasets import VideoDataset
+from finetune_VJEPA import VJEPA_FT
 from model import VJEPA
 
 if __name__ == "__main__":
@@ -13,15 +15,15 @@ if __name__ == "__main__":
         "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
-    BATCH_SIZE: int = 4
-    NUM_WORKERS: int = 4
+    BATCH_SIZE: int = 2
+    NUM_WORKERS: int = os.cpu_count() // 2
     PIN_MEMORY: bool = True
     PERSISTENT_WORKERS: bool = True
     PREFETCH_FACTOR: int = 4
     SHUFFLE: bool = False
     IMG_SIZE: int = 224
     FRAME_COUNT: int = 8
-    NUM_CLIPS: int = 4
+    NUM_CLIPS: int = 2
 
     vjepa_dataset = VideoDataset(
         dataset_path=dataset_path,
@@ -44,7 +46,13 @@ if __name__ == "__main__":
 
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = VJEPA(lr=4e-3, num_frames=vjepa_dataset.frames_per_clip).to(device)
+    model = VJEPA_FT(
+        pretrained_model_path="D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_1/checkpoints/epoch=1-step=241258.ckpt",
+        frame_count=FRAME_COUNT,
+        output_channels=3,
+        output_height=IMG_SIZE,
+        output_width=IMG_SIZE,
+    ).to(device)
 
     with torch.profiler.profile(
         activities=[
@@ -72,7 +80,7 @@ if __name__ == "__main__":
 
     # Save the configurations and profiling results to a text file
     profiler_results_file: Path = Path(
-        f"profiling/v-jepa/pretrain/profiler_output-{timestamp}.txt"
+        f"profiling/v-jepa/profiler_output-{timestamp}.txt"
     )
     profiler_results_file.parent.mkdir(exist_ok=True, parents=True)
     with open(

@@ -12,4 +12,4 @@ JEPA.drawio
 *.ipynb
 !t.ipynb
 finetune/*
-finetune1/*
+profiling/*

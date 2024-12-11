@@ -555,7 +555,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         # Define hyperparameters
         self.lr = lr
         self.weight_decay = weight_decay
-        self.phase = "video"
+        self.phase = "videos"
         self.m = m  # momentum
         self.target_aspect_ratio = target_aspect_ratio
         self.target_scale_interval = target_scale_interval

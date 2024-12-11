@@ -32,7 +32,7 @@ class VideoDataset(Dataset):
         ],
         frames_per_clip: int = 16,
         frame_step: int = 4,
-        num_clips: int = 1,
+        num_clips: int = 1,  # if set to -1 then use all possible clips
         shuffle: bool = True,
         transform: Optional[transforms.Compose] = None,
         filter_short_videos: bool = False,
@@ -84,7 +84,10 @@ class VideoDataset(Dataset):
             for i in range(num_full_clips)
         ]
         # If you want to limit the number of clips to self.num_clips
-        return full_clips[: self.num_clips]
+        if self.num_clips == -1:
+            return full_clips
+        else:
+            return full_clips[: self.num_clips]
 
     def __getitem__(self, index: int) -> List[torch.Tensor]:
         video_path: Path = self.video_paths[index]
@@ -100,7 +103,8 @@ class VideoDataset(Dataset):
             warnings.warn(info)
             return self.__getitem__(np.random.randint(self.__len__()))
         # Ensure the video has enough frames for the desired number of clips
-        if len(batch_frames) < self.frames_per_clip * self.num_clips:
+        # Either check if batch has atleast 1 clip or if batch has required clips
+        if len(batch_frames) < self.frames_per_clip * max(self.num_clips, 1):
             info: str = f"Skipping short video: {video_path.name=}"
             warnings.warn(info)
             return self.__getitem__(np.random.randint(self.__len__()))
@@ -140,8 +144,8 @@ class VideoDataModule(pl.LightningDataModule):
         dataset_path: Union[str, Path],
         batch_size: int = 16,
         frames_per_clip: int = 16,
-        frame_step: int = 4,
-        num_clips: int = 1,
+        frame_step: int = 4,  # how many frames to jump before extracting a frame for a clip
+        num_clips: int = 1,  # how many clips to extract from a video
         num_workers: int = 4,
         pin_memory: bool = True,
         persistent_workers: bool = True,
@@ -258,7 +262,7 @@ if __name__ == "__main__":
     # Initialize transform for tensor to PIL image
     to_pil = ToPILImage()
     dataset_path: Path = Path(
-        "/mnt/data/video/kinetics-dataset/k400"
+        "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
     test_vjepa_dataset = VideoDataset(
         dataset_path,
