@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
 from typing import Optional
 
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.callbacks import (  # ModelCheckpoint,
     LearningRateMonitor,
     ModelSummary,
@@ -12,6 +14,8 @@ from jepa_datasets import VideoDataModule
 from model import VJEPA
 
 if __name__ == "__main__":
+
+    torch.set_float32_matmul_precision("medium")
 
     dataset_path: Path = Path(
         "E:/ahmad/kinetics-dataset/smaller"
@@ -25,7 +29,7 @@ if __name__ == "__main__":
         pin_memory=True,
         prefetch_factor=4,
         num_clips=-1,
-        num_workers=4,
+        num_workers=4,  # os.cpu_count() // 2
     )
 
     model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)
@@ -45,12 +49,16 @@ if __name__ == "__main__":
         None
     )
 
+    mid_epoch_checkpoint_path: Optional[str] = None
+
+    if checkpoint_path is not None:
+        model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
+
     print("STARTING IMAGES")
 
     trainer_images = pl.Trainer(
         accelerator="gpu",
         devices=1,
-        # precision="16-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
         max_epochs=3,
         gradient_clip_val=0.1,
         callbacks=[lr_monitor, model_summary],
@@ -60,7 +68,7 @@ if __name__ == "__main__":
     model.phase = "images"
 
     trainer_images.fit(
-        model,
-        dataset_videos,
-        ckpt_path=checkpoint_path,
+        model=model,
+        datamodule=dataset_videos,
+        ckpt_path=mid_epoch_checkpoint_path,
     )

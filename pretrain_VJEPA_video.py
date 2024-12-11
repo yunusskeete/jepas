@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,8 @@ from model import VJEPA
 
 if __name__ == "__main__":
 
+    torch.set_float32_matmul_precision("medium")
+
     dataset_path: Path = Path(
         "/mnt/data/video/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
@@ -22,10 +25,11 @@ if __name__ == "__main__":
         dataset_path=dataset_path,
         batch_size=16,
         frames_per_clip=8,
+        num_workers=os.cpu_count() // 2,
         pin_memory=True,
         prefetch_factor=4,
         frame_step=8,
-        # num_clips=8,
+        num_clips=-1,
     )
 
     model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)
@@ -45,6 +49,8 @@ if __name__ == "__main__":
         None
     )
 
+    mid_epoch_checkpoint_path: Optional[str] = None
+
     if checkpoint_path is not None:
         model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
 
@@ -57,7 +63,10 @@ if __name__ == "__main__":
         gradient_clip_val=0.1,
         callbacks=[lr_monitor, model_summary],
         logger=logger,
+        profiler="advanced",
     )
     model.phase = "videos"
 
-    trainer_videos.fit(model, dataset_videos)
+    trainer_videos.fit(
+        model=model, datamodule=dataset_videos, ckpt_path=mid_epoch_checkpoint_path
+    )
