@@ -8,7 +8,11 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from PIL import Image
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelSummary
+from pytorch_lightning.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    ModelSummary,
+)
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from combine_Loss import TemporalConsistencyLoss
@@ -29,7 +33,8 @@ class LambdaLayer(nn.Module):
 class VJEPA_FT(pl.LightningModule):
     def __init__(
         self,
-        pretrained_model_path,
+        # pretrained_model_path,
+        vjepa_model: VJEPA,
         output_channels,
         output_height,
         output_width,
@@ -46,7 +51,7 @@ class VJEPA_FT(pl.LightningModule):
         self.lr = lr
         self.weight_decay = weight_decay
         self.frame_count = frame_count
-        self.pretrained_model_path = pretrained_model_path
+        # self.pretrained_model_path = pretrained_model_path
         self.drop_path = drop_path
         self.output_channels = output_channels
         self.output_height = output_height
@@ -59,7 +64,8 @@ class VJEPA_FT(pl.LightningModule):
         self.patch_size = (4, 16, 16)
 
         # Load the pretrained IJEPA model for video-based architecture
-        self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
+        # self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
+        self.pretrained_model = vjepa_model
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "videos"
         self.pretrained_model.layer_dropout = self.drop_path
@@ -125,12 +131,12 @@ class VJEPA_FT(pl.LightningModule):
             static_scene_temporal_reasoning=False,
             use_static_positional_embedding=False,
         )
-        print(f"SHAPE BEFORE MLP: {x.shape=}")
+        # print(f"SHAPE BEFORE MLP: {x.shape=}")
         temporal_output, _ = self.temporal_attention(x, x, x)
         x = self.mlp_head(
             temporal_output
         )  # [batch_size, output_channels, frame_count, output_height, output_width]
-        print(f"SHAPE AFTER MLP: {x.shape=}")
+        # print(f"SHAPE AFTER MLP: {x.shape=}")
 
         return x
 
@@ -139,9 +145,9 @@ class VJEPA_FT(pl.LightningModule):
         running_loss = 0.0
         running_accuracy = 0.0
         for clip in batch:
-            print(f"{clip.shape=}")
+            # print(f"{clip.shape=}")
             y_hat = self(x=clip)
-            print(f"{y_hat.shape=}")
+            # print(f"{y_hat.shape=}")
             save_frames_to_folder(
                 video_tensor=y_hat,
                 original_tensor=clip,
@@ -159,12 +165,8 @@ class VJEPA_FT(pl.LightningModule):
         running_loss /= len(batch)
         self.log("train_accuracy", running_accuracy)
         self.log("train_loss", running_loss)
-        print("train_accuracy", running_accuracy)
-        print("train_loss", running_loss)
-
-        # Save a checkpoint every N batches (e.g., every 100 batches)
-        if batch_idx % self.pretrained_model.mid_epoch_savepoint == 0:
-            self.pretrained_model.save_mid_epoch_checkpoint(batch_idx)
+        # print("train_accuracy", running_accuracy)
+        # print("train_loss", running_loss)
 
         return running_loss
 
@@ -174,7 +176,7 @@ class VJEPA_FT(pl.LightningModule):
         running_accuracy = 0.0
         for clip in batch:
             y_hat = self(x=clip)
-            print(f"{y_hat.shape=}")
+            # print(f"{y_hat.shape=}")
             save_frames_to_folder(
                 video_tensor=y_hat,
                 original_tensor=clip,
@@ -192,8 +194,8 @@ class VJEPA_FT(pl.LightningModule):
         running_loss /= len(batch)
         self.log("val_accuracy", running_accuracy)
         self.log("val_loss", running_loss)
-        print("val_accuracy", running_accuracy)
-        print("val_loss", running_loss)
+        # print("val_accuracy", running_accuracy)
+        # print("val_loss", running_loss)
         return running_loss
 
     def configure_optimizers(self):
@@ -280,54 +282,85 @@ if __name__ == "__main__":
 
     torch.set_float32_matmul_precision("medium")
     torch.cuda.empty_cache()
-    dataset: Path = Path("/mnt/data/video/kinetics-dataset/k400").resolve()
+    dataset_path: Path = Path("/mnt/data/video/kinetics-dataset/k400").resolve()
 
-    img_size: int = 224
-    frame_count: int = 8
-
-    dataset_module = VideoDataModule(
-        dataset_path=dataset,
-        batch_size=16,
-        frames_per_clip=frame_count,
-        num_workers=os.cpu_count() // 2,
+    dataset_videos = VideoDataModule(
+        dataset_path=dataset_path,
+        batch_size=4,
+        frames_per_clip=8,
+        frame_step=8,
         pin_memory=True,
         prefetch_factor=4,
-        prefetch_factor=4,
-        frame_step=8,
-        num_clips=2,
+        num_clips=2,  # -1
+        num_workers=4,
     )
 
-    mid_epoch_checkpoint_path: Optional[str] = (
-        "D:/MDX/Thesis/new-jepa/jepa/mid_epoch_checkpoints/checkpoint_batch_1600.ckpt"
-        # None
+    # TODO: Change to load from checkpoint
+    model = VJEPA(
+        decoder_depth=6,
+        lr=1e-3,
+        # # # # embed_dim=64,
+        # # # # enc_depth=8,
+        # # # # num_heads=8,
+        # # # embed_dim=192,
+        # # # enc_depth=18,
+        # # # num_heads=8,
+        # # embed_dim=384,
+        # # enc_depth=12,
+        # # num_heads=8,
+        # embed_dim=768,
+        # enc_depth=12,
+        # num_heads=12,
+        embed_dim=1024,
+        enc_depth=24,
+        num_heads=16,
+        num_frames=dataset_videos.frames_per_clip,
     )
 
-    model = VJEPA_FT(
-        pretrained_model_path="lightning_logs/v-jepa/pretrain/videos/version_3/checkpoints/epoch=2-step=45234.ckpt",
-        frame_count=frame_count,
+    finetune_model = VJEPA_FT(
+        # pretrained_model_path="lightning_logs/v-jepa/pretrain/videos/version_3/checkpoints/epoch=2-step=45234.ckpt",
+        vjepa_model=model,
+        frame_count=8,
         output_channels=3,
-        output_height=img_size,
-        output_width=img_size,
+        output_height=224,
+        output_width=224,
     )
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
 
+    # TensorBoard Logger
     logger = TensorBoardLogger(
         "lightning_logs",
         name="v-jepa/finetune/videos/",
     )
 
+    # Path to the checkpoint to resume from (use the latest checkpoint if available)
+    checkpoint_path: Optional[str] = None
+
+    # Define your checkpoint callback
+    checkpoint_callback = ModelCheckpoint(
+        dirpath="./checkpoints/VJEPA/finetune/videos/",  # Directory to save checkpoints
+        filename="epoch-{epoch:02d}-val_loss-{val_loss:.4f}",  # Naming scheme
+        save_top_k=3,
+        monitor="val_loss",
+        mode="min",
+    )
+
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=1,
-        max_epochs=6,
-        callbacks=[lr_monitor, model_summary],
-        logger=logger,
+        max_epochs=3,
         gradient_clip_val=0.1,
-        profiler="advanced",
+        callbacks=[
+            lr_monitor,
+            model_summary,
+            checkpoint_callback,
+        ],
+        logger=logger,
+        val_check_interval=15_000,
     )
 
     trainer.fit(
-        model=model, datamodule=dataset_module, ckpt_path=mid_epoch_checkpoint_path
+        model=finetune_model, datamodule=dataset_videos, ckpt_path=checkpoint_path
     )

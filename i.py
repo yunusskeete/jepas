@@ -9,12 +9,12 @@ from typing import *
 
 import numpy as np
 import torch
+from datasets.ijepa_dataset import ImageDataset
+from datasets.vjepa_dataset import VideoDataset
 from IPython.display import display
 from PIL import Image, ImageDraw
 from torchvision import transforms
 
-from datasets.ijepa_dataset import ImageDataset
-from datasets.vjepa_dataset import VideoDataset
 from model import IJEPA, VJEPA
 from model.patch_embed import PatchEmbed2D, PatchEmbed3D
 from utils.types import Number
@@ -36,15 +36,15 @@ image_model = IJEPA(testing_purposes_only=True)
 video_model = VJEPA(testing_purposes_only=True)
 
 image: List[torch.Tensor] = ids[0]
-print(f"{image.shape=}")  # (C, H, W)
+# print(f"{image.shape=}")  # (C, H, W)
 
 clips: List[torch.Tensor] = vds[0]
-print(f"{len(clips)=}")
+# print(f"{len(clips)=}")
 clip: torch.Tensor = clips[0]
-print(f"type(clip)={type(clip).__name__}")
-print(f"{clip.shape=}")  # (C, T, H, W)
+# print(f"type(clip)={type(clip).__name__}")
+# print(f"{clip.shape=}")  # (C, T, H, W)
 clip: torch.Tensor = clip.permute(1, 0, 2, 3)
-print(f"{clip.shape=}")  # (T, C, H, W)
+# print(f"{clip.shape=}")  # (T, C, H, W)
 
 
 class Self:  # pylint: disable=function-redefined
@@ -129,9 +129,9 @@ def visualise_patches_2d(self: Self, x: torch.Tensor):
         self.context_scale[0], self.context_scale[1]
     )
 
-    print(f"{target_aspect_ratio=}")
-    print(f"{target_scale=}")
-    print(f"{context_scale=}")
+    # print(f"{target_aspect_ratio=}")
+    # print(f"{target_scale=}")
+    # print(f"{context_scale=}")
 
     target_patches: List[List[int]]
     all_unique_target_patches: Set[int]
@@ -151,7 +151,7 @@ def visualise_patches_2d(self: Self, x: torch.Tensor):
 
     assert all_unique_target_patches.isdisjoint(set(context_patches))
 
-    print(f"{x.shape=}")  # torch.Size([3, 224, 224])
+    # print(f"{x.shape=}")  # torch.Size([3, 224, 224])
 
     unnormalised_image: np.array = unnormalise_image(image_tensor=x)
 

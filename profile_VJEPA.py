@@ -10,7 +10,7 @@ from model import VJEPA
 
 if __name__ == "__main__":
     dataset_path: Path = Path(
-        "E:/ahmad/kinetics-dataset/k400"
+        "/mnt/data/video/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
     BATCH_SIZE: int = 4
@@ -20,15 +20,16 @@ if __name__ == "__main__":
     PREFETCH_FACTOR: int = 4
     SHUFFLE: bool = False
     IMG_SIZE: int = 224
-    FRAME_COUNT: int = 8
-    NUM_CLIPS: int = 4
+    FRAME_STEP: int = 8
+    FRAMES_PER_CLIP: int = 8
+    NUM_CLIPS: int = 2
 
     vjepa_dataset = VideoDataset(
         dataset_path=dataset_path,
         stage="test",
         num_clips=NUM_CLIPS,
-        frame_step=FRAME_COUNT,
-        frames_per_clip=FRAME_COUNT,
+        frame_step=FRAME_STEP,
+        frames_per_clip=FRAMES_PER_CLIP,
     )
     print(f"{len(vjepa_dataset)=}")
 
@@ -88,6 +89,8 @@ if __name__ == "__main__":
         f.write(f"PREFETCH_FACTOR: {PREFETCH_FACTOR}\n")
         f.write(f"SHUFFLE: {SHUFFLE}\n")
         f.write(f"NUM CLIPS: {NUM_CLIPS}\n")
+        f.write(f"FRAME_STEP: {FRAME_STEP}\n")
+        f.write(f"FRAMES_PER_CLIP: {FRAMES_PER_CLIP}\n")
         f.write("\n")
 
         # Save the profiling results

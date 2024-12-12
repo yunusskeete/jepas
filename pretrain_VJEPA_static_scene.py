@@ -58,7 +58,7 @@ if __name__ == "__main__":
 
     model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
 
-    print("STARTING STATIC SCENES")
+    # print("STARTING STATIC SCENES")
 
     trainer_static = pl.Trainer(
         accelerator="gpu",

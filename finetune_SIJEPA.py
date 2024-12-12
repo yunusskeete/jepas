@@ -1,24 +1,20 @@
 # pylint: disable=no-value-for-parameter
 import os
 from pathlib import Path
-from PIL import Image
 from typing import Optional
 
 import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+from PIL import Image
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelSummary
 from pytorch_lightning.loggers import TensorBoardLogger
 
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import (
-    LearningRateMonitor,
-    ModelSummary,
-)
-from jepa_datasets import VideoDataModule
-
-from utils.types import Number
-from model.model import VJEPA
 from combine_Loss import TemporalConsistencyLoss
+from jepa_datasets import VideoDataModule
+from model.model import VJEPA
+from utils.types import Number
 
 
 class LambdaLayer(nn.Module):
@@ -117,14 +113,14 @@ class VJEPA_FT(pl.LightningModule):
             static_scene_temporal_reasoning=False,
             use_static_positional_embedding=True,
         )
-        print(f"SHAPE BEFORE MLP: {x.shape=}")
+        # print(f"SHAPE BEFORE MLP: {x.shape=}")
         # x = self.average_pool(x)  # conduct average pool like in paper
         # # new shape = [batch_size, num_patches, 1]
         # x = x.squeeze(-1)  # [batch_size, num_patches]
         x = self.mlp_head(
             x
         )  # [batch_size, output_channels, frame_count, output_height, output_width]
-        print(f"SHAPE AFTER MLP: {x.shape=}")
+        # print(f"SHAPE AFTER MLP: {x.shape=}")
 
         return x
 
@@ -132,10 +128,10 @@ class VJEPA_FT(pl.LightningModule):
         y = batch[0]
         x = y[:, :, 0:1, :, :]
         stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
-        print(f"{stacked_img.shape=}")
+        # print(f"{stacked_img.shape=}")
         y_hat = self(x=stacked_img, random_t=0)
-        print(f"{y_hat.shape=}")
-        print(f"{y.shape=}")
+        # print(f"{y_hat.shape=}")
+        # print(f"{y.shape=}")
         save_frames_to_folder(
             video_tensor=y_hat,
             original_tensor=y,
@@ -148,12 +144,8 @@ class VJEPA_FT(pl.LightningModule):
         )  # calculate accuracy
         self.log("train_accuracy", accuracy)
         self.log("train_loss", loss)
-        print("train_accuracy", accuracy)
-        print("train_loss", loss)
-
-        # Save a checkpoint every N batches (e.g., every 100 batches)
-        if batch_idx % self.pretrained_model.mid_epoch_savepoint == 0:
-            self.pretrained_model.save_mid_epoch_checkpoint(batch_idx)
+        # print("train_accuracy", accuracy)
+        # print("train_loss", loss)
 
         return loss
 
@@ -161,10 +153,10 @@ class VJEPA_FT(pl.LightningModule):
         y = batch[0]
         x = y[:, :, 0:1, :, :]
         stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
-        print(f"{stacked_img.shape=}")
+        # print(f"{stacked_img.shape=}")
         y_hat = self(x=stacked_img, random_t=0)
-        print(f"{y_hat.shape=}")
-        print(f"{y.shape=}")
+        # print(f"{y_hat.shape=}")
+        # print(f"{y.shape=}")
         save_frames_to_folder(
             video_tensor=y_hat,
             original_tensor=y,
@@ -177,8 +169,8 @@ class VJEPA_FT(pl.LightningModule):
         )  # calculate accuracy
         self.log("val_accuracy", accuracy)
         self.log("val_loss", loss)
-        print("val_accuracy", accuracy)
-        print("val_loss", loss)
+        # print"val_accuracy", accuracy)
+        # print("val_loss", loss)
         return loss
 
     def configure_optimizers(self):
@@ -249,7 +241,7 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
             os.path.join(target_folder, f"frame_{i+1}.png")
         )  # Save original frame
 
-    print(
+    # print(
         f"Saved {video_tensor.shape[1]} frames to 'target' and 'original' subfolders under '{base_folder}'."
     )
 

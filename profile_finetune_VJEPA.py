@@ -6,8 +6,8 @@ import torch
 import torch.profiler
 from torch.utils.data import DataLoader
 
-from jepa_datasets import VideoDataset
 from finetune_VJEPA import VJEPA_FT
+from jepa_datasets import VideoDataset
 from model import VJEPA
 
 if __name__ == "__main__":

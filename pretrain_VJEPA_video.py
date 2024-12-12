@@ -54,7 +54,7 @@ if __name__ == "__main__":
     if checkpoint_path is not None:
         model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
 
-    print("STARTING VIDEOS")
+    # print("STARTING VIDEOS")
 
     trainer_videos = pl.Trainer(
         accelerator="gpu",
