@@ -54,7 +54,7 @@ class VJEPA_FT(pl.LightningModule):
         self.target_scale_interval: float = 0.15
         self.context_aspect_ratio: Number = 1
         self.context_scale: float = 0.85
-        self.patch_size = (6, 16, 16)
+        self.patch_size = (4, 16, 16)
 
         # Load the pretrained IJEPA model for video-based architecture
         self.pretrained_model = VJEPA.load_from_checkpoint(
@@ -65,7 +65,15 @@ class VJEPA_FT(pl.LightningModule):
         self.pretrained_model.layer_dropout = self.drop_path
         self.pretrained_model.m = 1
         self.pretrained_model.momentum_limits = (1.0, 1.0)
-        self.average_pool = nn.AvgPool1d((self.pretrained_model.embed_dim), stride=1)
+
+        # Freeze all parameters in the pretrained model (backbone)
+        for param in self.pretrained_model.parameters():
+            param.requires_grad = False  # Freeze the pretrained model's parameters
+
+        self.temporal_attention = nn.MultiheadAttention(
+            embed_dim=self.pretrained_model.embed_dim,
+            num_heads=8,  # or suitable number of heads
+        )
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(self.pretrained_model.embed_dim),
@@ -80,25 +88,29 @@ class VJEPA_FT(pl.LightningModule):
                     self.pretrained_model.img_size[1]
                     // self.pretrained_model.patch_size[1],
                 ),
-            ),  # Reshape into patches
+            ),
             LambdaLayer(lambda x: x.permute(0, 4, 1, 2, 3)),
-            # nn.Upsample(scale_factor=(2, 2, 2), mode="trilinear", align_corners=True),
             nn.ReLU(),
+            nn.Conv3d(
+                in_channels=np.prod(self.patch_size),
+                out_channels=np.prod(self.patch_size),
+                kernel_size=(3, 1, 1),
+                stride=(1, 1, 1),
+                padding=(1, 0, 0),  # Temporal padding
+            ),  # Temporal convolution
             nn.ConvTranspose3d(
-                in_channels=np.prod(
-                    self.patch_size
-                ),  # Input channels (from the patch size)
-                out_channels=3,  # RGB output
+                in_channels=np.prod(self.patch_size),
+                out_channels=3,
                 kernel_size=(
                     self.pretrained_model.tubelet_size,
                     self.pretrained_model.patch_size[0],
                     self.pretrained_model.patch_size[1],
-                ),  # Same as the Conv3D kernel
+                ),
                 stride=(
                     self.pretrained_model.tubelet_size,
                     self.pretrained_model.patch_size[0],
                     self.pretrained_model.patch_size[1],
-                ),  # Same stride as Conv3D
+                ),
             ),
         )
 
@@ -113,18 +125,13 @@ class VJEPA_FT(pl.LightningModule):
             context_aspect_ratio=self.context_aspect_ratio,
             context_scale=self.context_scale,
             static_scene_temporal_reasoning=False,
-            use_static_positional_embedding=True,
+            use_static_positional_embedding=False,
             random_t=random_t,
         )
-        # print(f"SHAPE BEFORE MLP: {x.shape=}")
-        # x = self.average_pool(x)  # conduct average pool like in paper
-        # # new shape = [batch_size, num_patches, 1]
-        # x = x.squeeze(-1)  # [batch_size, num_patches]
-        # x = self.pretrained_model.predictor.decoder(x)
+        temporal_output, _ = self.temporal_attention(x, x, x)
         x = self.mlp_head(
-            x
+            temporal_output
         )  # [batch_size, output_channels, frame_count, output_height, output_width]
-        # print(f"SHAPE AFTER MLP: {x.shape=}")
 
         return x
 
@@ -203,7 +210,7 @@ class VJEPA_FT(pl.LightningModule):
 
 def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx):
     # Create folder structure with unique folder names
-    if batch_idx % 5000 != 0:
+    if batch_idx % 800 != 0:
         return
 
     base_folder = f"{folder_name}/{batch_idx}"
@@ -269,7 +276,7 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
             os.path.join(target_folder, f"frame_{i+1}.png")
         )  # Save original frame
 
-    # print(
+    print(
         f"Saved {video_tensor.shape[1]} frames to 'target' and 'original' subfolders under '{base_folder}'."
     )
 
@@ -279,26 +286,26 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
 
     dataset_path: Path = Path(
-        "/mnt/data/video/kinetics-dataset/k400"
+        "E:/ahmad/kinetics-dataset/vsmall"
     ).resolve()  # Path to Kinetics dataset
 
     img_size: int = 224
-    frame_count: int = 16
+    frame_count: int = 8
 
     dataset = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=16,
-        # batch_size=1,
+        batch_size=8,
         frames_per_clip=frame_count,
+        num_workers=os.cpu_count() // 2,
+        prefetch_factor=4,
         frame_step=8,
         pin_memory=True,
-        prefetch_factor=4,
+        num_clips=1,
     )
 
     model = VJEPA_FT(
-        lr=1e-4,
-        # lr=1e-3,
-        # pretrained_model_path="/home/yunusskeete/Downloads/version_2/checkpoints/epoch=2-step=723774.ckpt",
+        lr=1e-3,
+        pretrained_model_path="D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_4/checkpoints/epoch=2-step=7875.ckpt",
         frame_count=frame_count,
         output_channels=3,
         output_height=img_size,

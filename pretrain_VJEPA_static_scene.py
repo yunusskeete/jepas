@@ -1,7 +1,9 @@
 from pathlib import Path
+import os
 from typing import Optional
 
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.callbacks import (  # ModelCheckpoint,
     LearningRateMonitor,
     ModelSummary,
@@ -12,24 +14,27 @@ from jepa_datasets import VideoDataModule
 from model import VJEPA
 
 if __name__ == "__main__":
-    import time
 
-    time.sleep(60 * 20)
+    torch.set_float32_matmul_precision("medium")
 
     dataset_path: Path = Path(
-        "/mnt/data/video/kinetics-dataset/k400"
+        "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
     dataset_videos = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=16,
+        batch_size=8,
         frames_per_clip=8,
+        num_workers=os.cpu_count() // 2,
         pin_memory=True,
         prefetch_factor=4,
         frame_step=8,
+        num_clips=1,
     )
 
     model = VJEPA(lr=5e-4, num_frames=dataset_videos.frames_per_clip)
+    model.m = 1
+    model.momentum_limits = (1.0, 1.0)
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
@@ -42,23 +47,12 @@ if __name__ == "__main__":
 
     # Path to the checkpoint to resume from (use the latest checkpoint if available)
     checkpoint_path: Optional[str] = (
-        "lightning_logs/v-jepa/pretrain/videos/version_3/checkpoints/epoch=1-step=30156.ckpt"
+        "D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_1/checkpoints/epoch=1-step=241258.ckpt"
         # None
     )
-    checkpoint_paths: Path = Path(
-        "lightning_logs/v-jepa/pretrain/videos/version_3/checkpoints"
-    )
-    assert checkpoint_paths.exists, f"Checkpoints do not exist: '{checkpoint_paths}'"
 
-    checkpoint: Path = [
-        path for path in checkpoint_paths.glob("*.ckpt") if "epoch=2" in path.name
-    ][0]
-    assert checkpoint.exists, f"Checkpoint does not exist: '{checkpoint}'"
-    checkpoint_path = str(checkpoint)
-
-    model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
-
-    # print("STARTING STATIC SCENES")
+    if checkpoint_path is not None:
+        model = VJEPA.load_from_checkpoint(checkpoint_path=checkpoint_path)
 
     trainer_static = pl.Trainer(
         accelerator="gpu",
