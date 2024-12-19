@@ -28,6 +28,7 @@ class VJEPA_FT(pl.LightningModule):
     def __init__(
         self,
         pretrained_model_path,
+        finetune_vjepa_model_path,
         output_channels,
         output_height,
         output_width,
@@ -45,6 +46,7 @@ class VJEPA_FT(pl.LightningModule):
         self.weight_decay = weight_decay
         self.frame_count = frame_count
         self.pretrained_model_path = pretrained_model_path
+        self.finetune_vjepa_model_path = finetune_vjepa_model_path
         self.drop_path = drop_path
         self.output_channels = output_channels
         self.output_height = output_height
@@ -58,6 +60,9 @@ class VJEPA_FT(pl.LightningModule):
 
         # Load the pretrained IJEPA model for video-based architecture
         self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
+        self.finetune_vjepa_model = VJEPA_FT.load_from_checkpoint(
+            self.finetune_vjepa_model_path
+        )
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "static_scene"
         self.pretrained_model.layer_dropout = self.drop_path
@@ -138,8 +143,10 @@ class VJEPA_FT(pl.LightningModule):
             (context, target_prediction), dim=1
         )  # (batch_size, num_context_patches + num_target_patches, embed_dim)
 
-        temporal_output, _ = self.temporal_attention(prediction, prediction, prediction)
-        temporal_output = self.mlp_head(
+        temporal_output, _ = self.finetune_vjepa_model.temporal_attention(
+            prediction, prediction, prediction
+        )
+        temporal_output = self.finetune_vjepa_model.mlp_head(
             temporal_output
         )  # [batch_size, output_channels, frame_count, output_height, output_width]
 
@@ -351,6 +358,7 @@ if __name__ == "__main__":
     model = VJEPA_FT(
         lr=1e-3,
         pretrained_model_path="D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt",
+        finetune_vjepa_model_path="",
         frame_count=frame_count,
         output_channels=3,
         output_height=img_size,
