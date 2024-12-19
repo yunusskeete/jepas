@@ -128,15 +128,66 @@ class VJEPA_FT(pl.LightningModule):
             use_static_positional_embedding=True,
             random_t=random_t,
         )
-        x = self.pretrained_model.predictor.decoder(x)
+        context, target = self.mask_frames(x)
+        target_prediction = self.pretrained_model.predictor(
+            context_encoding=context, target_masks=target
+        )
         #########################
 
-        temporal_output, _ = self.temporal_attention(x, x, x)
-        x = self.mlp_head(
+        prediction = torch.cat(
+            (context, target_prediction), dim=1
+        )  # (batch_size, num_context_patches + num_target_patches, embed_dim)
+
+        temporal_output, _ = self.temporal_attention(prediction, prediction, prediction)
+        temporal_output = self.mlp_head(
             temporal_output
         )  # [batch_size, output_channels, frame_count, output_height, output_width]
 
-        return x
+        return temporal_output
+
+    def mask_frames(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Masks all frames except the first one and returns two tensors:
+        one for the first frame and another for the masked frames.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [batch_size, num_patches, embed_dim].
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: A tuple containing:
+                - first_frame_tensor: Tensor of the first frame with positional embeddings.
+                - masked_frame_tensor: Tensor of the masked frames with mask tokens and adjusted positional embeddings.
+        """
+        batch_size, num_patches, embed_dim = x.shape
+
+        # Calculate patches per frame
+        patches_per_frame = int(
+            (self.output_height / self.patch_size[1])
+            * (self.output_width / self.patch_size[2])
+        )
+
+        # Indices for the first frame and masked frames
+        first_frame_indices = torch.arange(patches_per_frame)
+        masked_frame_indices = torch.arange(patches_per_frame, num_patches)
+
+        # Extract positional embeddings for the first and masked frames
+        first_frame_pos_embedding = self.pretrained_model.pos_embedding[
+            :, first_frame_indices, :
+        ]
+        masked_frame_pos_embedding = (
+            self.pretrained_model.pos_embedding[:, masked_frame_indices, :] + 1.0
+        )  # Add offset for masked positional embeddings
+
+        # First frame tensor: Keep original tensor values with positional embeddings
+        first_frame_tensor = x[:, first_frame_indices, :] + first_frame_pos_embedding
+
+        # Masked frame tensor: Replace with mask token and adjusted positional embeddings
+        mask_token_repeated = self.pretrained_model.mask_token.expand(
+            batch_size, masked_frame_indices.size(0), embed_dim
+        )
+        masked_frame_tensor = mask_token_repeated + masked_frame_pos_embedding
+
+        return first_frame_tensor, masked_frame_tensor
 
     def training_step(self, batch, batch_idx):
         clip: torch.Tensor
