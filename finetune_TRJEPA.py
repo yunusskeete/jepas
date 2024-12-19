@@ -57,9 +57,7 @@ class VJEPA_FT(pl.LightningModule):
         self.patch_size = (4, 16, 16)
 
         # Load the pretrained IJEPA model for video-based architecture
-        self.pretrained_model = VJEPA.load_from_checkpoint(
-            self.pretrained_model_path, strict=False
-        )
+        self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "static_scene"
         self.pretrained_model.layer_dropout = self.drop_path
@@ -118,6 +116,8 @@ class VJEPA_FT(pl.LightningModule):
         self.criterion = nn.MSELoss()
 
     def forward(self, x, random_t):
+        ###########################
+        # NOTE: this is effectively our video encoder
         x = self.pretrained_model(
             x=x,
             target_aspect_ratio=self.target_aspect_ratio,
@@ -125,9 +125,12 @@ class VJEPA_FT(pl.LightningModule):
             context_aspect_ratio=self.context_aspect_ratio,
             context_scale=self.context_scale,
             static_scene_temporal_reasoning=False,
-            use_static_positional_embedding=False,
+            use_static_positional_embedding=True,
             random_t=random_t,
         )
+        x = self.pretrained_model.predictor.decoder(x)
+        #########################
+
         temporal_output, _ = self.temporal_attention(x, x, x)
         x = self.mlp_head(
             temporal_output
@@ -143,10 +146,7 @@ class VJEPA_FT(pl.LightningModule):
             y = clip
             x = y[:, :, 0:1, :, :]
             stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
-            # print(f"{stacked_img.shape=}")
             y_hat = self(x=stacked_img, random_t=0)
-            # print(f"{y_hat.shape=}")
-            # print(f"{y.shape=}")
             save_frames_to_folder(
                 video_tensor=y_hat,
                 original_tensor=y,
@@ -164,8 +164,6 @@ class VJEPA_FT(pl.LightningModule):
         running_loss /= len(batch)
         self.log("train_accuracy", running_accuracy)
         self.log("train_loss", running_loss)
-        # print("train_accuracy", running_accuracy)
-        # print("train_loss", running_loss)
         return running_loss
 
     def validation_step(self, batch, batch_idx):
@@ -176,10 +174,7 @@ class VJEPA_FT(pl.LightningModule):
             y = clip
             x = y[:, :, 0:1, :, :]
             stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
-            # print(f"{stacked_img.shape=}")
             y_hat = self(x=stacked_img, random_t=0)
-            # print(f"{y_hat.shape=}")
-            # print(f"{y.shape=}")
             save_frames_to_folder(
                 video_tensor=y_hat,
                 original_tensor=y,
@@ -197,8 +192,6 @@ class VJEPA_FT(pl.LightningModule):
         running_loss /= len(batch)
         self.log("train_accuracy", running_accuracy)
         self.log("train_loss", running_loss)
-        # print("train_accuracy", running_accuracy)
-        # print("train_loss", running_loss)
         return running_loss
 
     def configure_optimizers(self):
@@ -210,7 +203,7 @@ class VJEPA_FT(pl.LightningModule):
 
 def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx):
     # Create folder structure with unique folder names
-    if batch_idx % 800 != 0:
+    if batch_idx % 5000 != 0:
         return
 
     base_folder = f"{folder_name}/{batch_idx}"
@@ -284,9 +277,10 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
 if __name__ == "__main__":
 
     torch.cuda.empty_cache()
+    torch.set_float32_matmul_precision("medium")
 
     dataset_path: Path = Path(
-        "E:/ahmad/kinetics-dataset/vsmall"
+        "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
     img_size: int = 224
@@ -305,7 +299,7 @@ if __name__ == "__main__":
 
     model = VJEPA_FT(
         lr=1e-3,
-        pretrained_model_path="D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_4/checkpoints/epoch=2-step=7875.ckpt",
+        pretrained_model_path="D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt",
         frame_count=frame_count,
         output_channels=3,
         output_height=img_size,
@@ -323,7 +317,7 @@ if __name__ == "__main__":
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=1,
-        max_epochs=3,
+        max_epochs=5,
         callbacks=[lr_monitor, model_summary],
         logger=logger,
         gradient_clip_val=0.1,
