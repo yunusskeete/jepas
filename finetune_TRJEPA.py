@@ -1,6 +1,7 @@
 # pylint: disable=no-value-for-parameter
 import os
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pytorch_lightning as pl
@@ -12,6 +13,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 from jepa_datasets import VideoDataModule
 from pretrain_VJEPA_static_scene import VJEPA
+from finetune_VJEPA import VJEPA_FT
 from utils.types import Number
 
 
@@ -24,15 +26,15 @@ class LambdaLayer(nn.Module):
         return self.func(x)
 
 
-class VJEPA_FT(pl.LightningModule):
+class TRJEPA_FT(pl.LightningModule):
     def __init__(
         self,
         pretrained_model_path,
-        finetune_vjepa_model_path,
         output_channels,
         output_height,
         output_width,
         frame_count,
+        finetune_vjepa_model_path: Optional[str] = None,
         lr=1e-4,
         weight_decay=0,
         drop_path=0.1,
@@ -60,9 +62,10 @@ class VJEPA_FT(pl.LightningModule):
 
         # Load the pretrained IJEPA model for video-based architecture
         self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
-        self.finetune_vjepa_model = VJEPA_FT.load_from_checkpoint(
-            self.finetune_vjepa_model_path
-        )
+        if self.finetune_vjepa_model_path is not None:
+            self.finetune_vjepa_model = VJEPA_FT.load_from_checkpoint(
+                self.finetune_vjepa_model_path
+            )
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "static_scene"
         self.pretrained_model.layer_dropout = self.drop_path
@@ -143,12 +146,20 @@ class VJEPA_FT(pl.LightningModule):
             (context, target_prediction), dim=1
         )  # (batch_size, num_context_patches + num_target_patches, embed_dim)
 
-        temporal_output, _ = self.finetune_vjepa_model.temporal_attention(
-            prediction, prediction, prediction
-        )
-        temporal_output = self.finetune_vjepa_model.mlp_head(
-            temporal_output
-        )  # [batch_size, output_channels, frame_count, output_height, output_width]
+        if self.finetune_vjepa_model_path is not None:
+            temporal_output, _ = self.finetune_vjepa_model.temporal_attention(
+                prediction, prediction, prediction
+            )
+            temporal_output = self.finetune_vjepa_model.mlp_head(
+                temporal_output
+            )  # [batch_size, output_channels, frame_count, output_height, output_width]
+        else:
+            temporal_output, _ = self.temporal_attention(
+                prediction, prediction, prediction
+            )
+            temporal_output = self.mlp_head(
+                temporal_output
+            )  # [batch_size, output_channels, frame_count, output_height, output_width]
 
         return temporal_output
 
@@ -355,10 +366,10 @@ if __name__ == "__main__":
         num_clips=1,
     )
 
-    model = VJEPA_FT(
+    model = TRJEPA_FT(
         lr=1e-3,
         pretrained_model_path="D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt",
-        finetune_vjepa_model_path="",
+        finetune_vjepa_model_path=None,
         frame_count=frame_count,
         output_channels=3,
         output_height=img_size,
