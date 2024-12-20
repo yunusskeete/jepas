@@ -81,7 +81,7 @@ class VisionTransformer(nn.Module):
             nn.LayerNorm(embed_dim) if self.post_enc_norm else nn.Identity()
         )  # student encoder
 
-    def pseudo_3d_pos_embedding(self, conv_t, conv_h, conv_w, random_t: int):
+    def pseudo_3d_pos_embedding(self, patch_shape, random_t: int):
         """
         Generates a pseudo-3D positional embedding by reshaping and stacking a 2D positional embedding.
 
@@ -97,12 +97,13 @@ class VisionTransformer(nn.Module):
         Side Effects:
             Updates `self.stacked_pos_embedding` with the reshaped and stacked positional embedding.
         """
+        t, h, w = patch_shape
         pos_emb_reshape = rearrange(
             self.pos_embedding,
             "b (t h w) e -> b e t h w",
-            t=conv_t,
-            h=conv_h,
-            w=conv_w,
+            t=t,
+            h=h,
+            w=w,
         )
 
         single_pos_embedding_slice = pos_emb_reshape[:, :, random_t, :, :]
@@ -113,7 +114,7 @@ class VisionTransformer(nn.Module):
 
         single_t_slice_reshaped = single_pos_embedding_slice.unsqueeze(2)
 
-        pos_emb_stacked = single_t_slice_reshaped.repeat(1, 1, conv_t, 1, 1)
+        pos_emb_stacked = single_t_slice_reshaped.repeat(1, 1, t, 1, 1)
 
         assert (
             pos_emb_stacked.shape == pos_emb_reshape.shape
@@ -141,9 +142,7 @@ class VisionTransformer(nn.Module):
             x_stacked = self.patch_embed(x_stacked)
 
             self.pseudo_3d_pos_embedding(
-                conv_t=self.num_frames // self.tubelet_size,
-                conv_h=self.img_size[0] // self.patch_size[0],
-                conv_w=self.img_size[1] // self.patch_size[1],
+                patch_shape=self.patch_embed.patch_shape,
                 random_t=random_t,
             )
             x_stacked = x_stacked + self.stacked_pos_embedding

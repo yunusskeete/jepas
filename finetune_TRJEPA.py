@@ -30,15 +30,10 @@ class TRJEPA_FT(pl.LightningModule):
     def __init__(
         self,
         pretrained_model_path,
-        output_channels,
-        output_height,
-        output_width,
-        frame_count,
         finetune_vjepa_model_path: Optional[str] = None,
         lr=1e-4,
         weight_decay=0,
         drop_path=0.1,
-        num_decoder_layers=6,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -46,19 +41,14 @@ class TRJEPA_FT(pl.LightningModule):
         # Set learning parameters
         self.lr = lr
         self.weight_decay = weight_decay
-        self.frame_count = frame_count
         self.pretrained_model_path = pretrained_model_path
         self.finetune_vjepa_model_path = finetune_vjepa_model_path
         self.drop_path = drop_path
-        self.output_channels = output_channels
-        self.output_height = output_height
-        self.output_width = output_width
 
         self.target_aspect_ratio: float = 0.75
         self.target_scale_interval: float = 0.15
         self.context_aspect_ratio: Number = 1
         self.context_scale: float = 0.85
-        self.patch_size = (4, 16, 16)
 
         # Load the pretrained IJEPA model for video-based architecture
         self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
@@ -83,7 +73,10 @@ class TRJEPA_FT(pl.LightningModule):
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(self.pretrained_model.embed_dim),
-            nn.Linear(self.pretrained_model.embed_dim, np.prod(self.patch_size)),
+            nn.Linear(
+                self.pretrained_model.embed_dim,
+                np.prod(self.pretrained_model.patch_size),
+            ),
             nn.Unflatten(
                 1,
                 (
@@ -98,14 +91,14 @@ class TRJEPA_FT(pl.LightningModule):
             LambdaLayer(lambda x: x.permute(0, 4, 1, 2, 3)),
             nn.ReLU(),
             nn.Conv3d(
-                in_channels=np.prod(self.patch_size),
-                out_channels=np.prod(self.patch_size),
+                in_channels=np.prod(self.pretrained_model.patch_size),
+                out_channels=np.prod(self.pretrained_model.patch_size),
                 kernel_size=(3, 1, 1),
                 stride=(1, 1, 1),
                 padding=(1, 0, 0),  # Temporal padding
             ),  # Temporal convolution
             nn.ConvTranspose3d(
-                in_channels=np.prod(self.patch_size),
+                in_channels=np.prod(self.pretrained_model.patch_size),
                 out_channels=3,
                 kernel_size=(
                     self.pretrained_model.tubelet_size,
@@ -180,8 +173,8 @@ class TRJEPA_FT(pl.LightningModule):
 
         # Calculate patches per frame
         patches_per_frame = int(
-            (self.output_height / self.patch_size[1])
-            * (self.output_width / self.patch_size[2])
+            (self.output_height / self.pretrained_model.patch_size[1])
+            * (self.output_width / self.pretrained_model.patch_size[2])
         )
 
         # Indices for the first frame and masked frames
@@ -352,13 +345,10 @@ if __name__ == "__main__":
         "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
-    img_size: int = 224
-    frame_count: int = 8
-
     dataset = VideoDataModule(
         dataset_path=dataset_path,
         batch_size=8,
-        frames_per_clip=frame_count,
+        frames_per_clip=8,
         num_workers=os.cpu_count() // 2,
         prefetch_factor=4,
         frame_step=8,
@@ -370,10 +360,6 @@ if __name__ == "__main__":
         lr=1e-3,
         pretrained_model_path="D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt",
         finetune_vjepa_model_path=None,
-        frame_count=frame_count,
-        output_channels=3,
-        output_height=img_size,
-        output_width=img_size,
     )
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
