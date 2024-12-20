@@ -175,8 +175,8 @@ class TRJEPA_FT(pl.LightningModule):
 
         # Calculate patches per frame
         patches_per_frame = int(
-            (self.output_height / self.pretrained_model.patch_size[1])
-            * (self.output_width / self.pretrained_model.patch_size[2])
+            (self.pretrained_model.img_size[0] / self.pretrained_model.patch_size[0])
+            * (self.pretrained_model.img_size[1] / self.pretrained_model.patch_size[1])
         )
 
         # Indices for the first frame and masked frames

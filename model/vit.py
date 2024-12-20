@@ -150,9 +150,7 @@ class VisionTransformer(nn.Module):
 
         if use_static_positional_embedding:
             self.pseudo_3d_pos_embedding(
-                conv_t=self.num_frames // self.tubelet_size,
-                conv_h=self.img_size[0] // self.patch_size[0],
-                conv_w=self.img_size[1] // self.patch_size[1],
+                patch_shape=self.patch_embed.patch_shape,
                 random_t=random_t,
             )
             x_embed = x_embed + self.stacked_pos_embedding
