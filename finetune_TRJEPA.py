@@ -31,6 +31,7 @@ class TRJEPA_FT(pl.LightningModule):
         self,
         pretrained_model_path,
         finetune_vjepa_model_path: Optional[str] = None,
+        frame_count: int = 8,
         lr=1e-4,
         weight_decay=0,
         drop_path=0.1,
@@ -39,10 +40,11 @@ class TRJEPA_FT(pl.LightningModule):
         self.save_hyperparameters()
 
         # Set learning parameters
-        self.lr = lr
         self.weight_decay = weight_decay
         self.pretrained_model_path = pretrained_model_path
         self.finetune_vjepa_model_path = finetune_vjepa_model_path
+        self.frame_count = frame_count
+        self.lr = lr
         self.drop_path = drop_path
 
         self.target_aspect_ratio: float = 0.75
@@ -360,6 +362,7 @@ if __name__ == "__main__":
         lr=1e-3,
         pretrained_model_path="D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt",
         finetune_vjepa_model_path=None,
+        frame_count=dataset.frames_per_clip,
     )
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
