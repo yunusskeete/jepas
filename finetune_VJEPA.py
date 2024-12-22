@@ -15,7 +15,6 @@ from pytorch_lightning.callbacks import (
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from combine_Loss import TemporalConsistencyLoss
 from jepa_datasets import VideoDataModule
 from pretrain_VJEPA_static_scene import VJEPA
 from utils.types import Number
@@ -33,16 +32,12 @@ class LambdaLayer(nn.Module):
 class VJEPA_FT(pl.LightningModule):
     def __init__(
         self,
-        # pretrained_model_path,
         vjepa_model: VJEPA,
-        output_channels,
-        output_height,
-        output_width,
-        frame_count,
+        frame_count: int = 8,
+        batch_size: int = 8,
         lr=1e-4,
         weight_decay=0,
         drop_path=0.1,
-        num_decoder_layers=6,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -51,24 +46,21 @@ class VJEPA_FT(pl.LightningModule):
         self.lr = lr
         self.weight_decay = weight_decay
         self.frame_count = frame_count
-        # self.pretrained_model_path = pretrained_model_path
+        self.batch_size = batch_size
         self.drop_path = drop_path
-        self.output_channels = output_channels
-        self.output_height = output_height
-        self.output_width = output_width
 
         self.target_aspect_ratio: float = 0.75
         self.target_scale_interval: float = 0.15
         self.context_aspect_ratio: Number = 1
         self.context_scale: float = 0.85
-        self.patch_size = (4, 16, 16)
+        self.channels: int = 3
 
-        # Load the pretrained IJEPA model for video-based architecture
-        # self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
         self.pretrained_model = vjepa_model
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "videos"
         self.pretrained_model.layer_dropout = self.drop_path
+        self.pretrained_model.m = 1
+        self.pretrained_model.momentum_limits = (1.0, 1.0)
 
         # Freeze all parameters in the pretrained model (backbone)
         for param in self.pretrained_model.parameters():
@@ -81,40 +73,24 @@ class VJEPA_FT(pl.LightningModule):
 
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(self.pretrained_model.embed_dim),
-            nn.Linear(self.pretrained_model.embed_dim, np.prod(self.patch_size)),
-            nn.Unflatten(
-                1,
+            nn.Linear(
+                self.pretrained_model.embed_dim,
                 (
-                    self.pretrained_model.num_frames
-                    // self.pretrained_model.tubelet_size,
-                    self.pretrained_model.img_size[0]
-                    // self.pretrained_model.patch_size[0],
-                    self.pretrained_model.img_size[1]
-                    // self.pretrained_model.patch_size[1],
+                    self.pretrained_model.tubelet_size
+                    * self.pretrained_model.patch_size[0]
+                    * self.pretrained_model.patch_size[1]
+                    * self.channels
                 ),
             ),
-            LambdaLayer(lambda x: x.permute(0, 4, 1, 2, 3)),
-            nn.ReLU(),
-            nn.Conv3d(
-                in_channels=np.prod(self.patch_size),
-                out_channels=np.prod(self.patch_size),
-                kernel_size=(3, 1, 1),
-                stride=(1, 1, 1),
-                padding=(1, 0, 0),  # Temporal padding
-            ),  # Temporal convolution
-            nn.ConvTranspose3d(
-                in_channels=np.prod(self.patch_size),
-                out_channels=3,
-                kernel_size=(
-                    self.pretrained_model.tubelet_size,
-                    self.pretrained_model.patch_size[0],
-                    self.pretrained_model.patch_size[1],
-                ),
-                stride=(
-                    self.pretrained_model.tubelet_size,
-                    self.pretrained_model.patch_size[0],
-                    self.pretrained_model.patch_size[1],
-                ),
+            LambdaLayer(lambda x: x.view(self.batch_size, -1)),
+            LambdaLayer(
+                lambda x: x.reshape(
+                    self.batch_size,
+                    self.channels,
+                    self.pretrained_model.num_frames,
+                    self.pretrained_model.img_size[0],
+                    self.pretrained_model.img_size[1],
+                )
             ),
         )
 
@@ -131,12 +107,14 @@ class VJEPA_FT(pl.LightningModule):
             static_scene_temporal_reasoning=False,
             use_static_positional_embedding=False,
         )
-        # print(f"SHAPE BEFORE MLP: {x.shape=}")
+        print(f"SHAPE BEFORE MLP: {x.shape=}")
+
         temporal_output, _ = self.temporal_attention(x, x, x)
         x = self.mlp_head(
             temporal_output
         )  # [batch_size, output_channels, frame_count, output_height, output_width]
-        # print(f"SHAPE AFTER MLP: {x.shape=}")
+
+        print(f"SHAPE AFTER MLP: {x.shape=}")
 
         return x
 
@@ -145,28 +123,27 @@ class VJEPA_FT(pl.LightningModule):
         running_loss = 0.0
         running_accuracy = 0.0
         for clip in batch:
-            # print(f"{clip.shape=}")
-            y_hat = self(x=clip)
-            # print(f"{y_hat.shape=}")
-            save_frames_to_folder(
-                video_tensor=y_hat,
-                original_tensor=clip,
-                folder_name="finetune/video",
-                batch_idx=batch_idx,
-            )
-            loss = self.criterion(y_hat, clip)  # calculate loss
-            accuracy = (
-                (y_hat.argmax(dim=1) == clip.argmax(dim=1)).float().mean()
-            )  # calculate accuracy
-            running_loss += loss
-            running_accuracy += accuracy
+            try:
+                y_hat = self(x=clip)
+                save_frames_to_folder(
+                    video_tensor=y_hat,
+                    original_tensor=clip,
+                    folder_name="finetune/video",
+                    batch_idx=batch_idx,
+                )
+                loss = self.criterion(y_hat, clip)  # calculate loss
+                accuracy = (
+                    (y_hat.argmax(dim=1) == clip.argmax(dim=1)).float().mean()
+                )  # calculate accuracy
+                running_loss += loss
+                running_accuracy += accuracy
+            except Exception as e:
+                print(f"Some exception: {e}")
 
         running_accuracy /= len(batch)
         running_loss /= len(batch)
         self.log("train_accuracy", running_accuracy)
         self.log("train_loss", running_loss)
-        # print("train_accuracy", running_accuracy)
-        # print("train_loss", running_loss)
 
         return running_loss
 
@@ -176,7 +153,6 @@ class VJEPA_FT(pl.LightningModule):
         running_accuracy = 0.0
         for clip in batch:
             y_hat = self(x=clip)
-            # print(f"{y_hat.shape=}")
             save_frames_to_folder(
                 video_tensor=y_hat,
                 original_tensor=clip,
@@ -194,8 +170,7 @@ class VJEPA_FT(pl.LightningModule):
         running_loss /= len(batch)
         self.log("val_accuracy", running_accuracy)
         self.log("val_loss", running_loss)
-        # print("val_accuracy", running_accuracy)
-        # print("val_loss", running_loss)
+
         return running_loss
 
     def configure_optimizers(self):
@@ -280,50 +255,30 @@ def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx)
 
 if __name__ == "__main__":
 
-    torch.set_float32_matmul_precision("medium")
     torch.cuda.empty_cache()
-    dataset_path: Path = Path("/mnt/data/video/kinetics-dataset/k400").resolve()
+    torch.set_float32_matmul_precision("medium")
 
-    dataset_videos = VideoDataModule(
+    dataset_path: Path = Path(
+        "E:/ahmad/kinetics-dataset/k400"
+    ).resolve()  # Path to Kinetics dataset
+
+    dataset = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=4,
+        batch_size=8,
         frames_per_clip=8,
+        num_workers=os.cpu_count() // 2,
+        prefetch_factor=4,
         frame_step=8,
         pin_memory=True,
-        prefetch_factor=4,
-        num_clips=2,  # -1
-        num_workers=4,
+        num_clips=1,
     )
 
-    # TODO: Change to load from checkpoint
-    model = VJEPA(
-        decoder_depth=6,
-        lr=1e-3,
-        # # # # embed_dim=64,
-        # # # # enc_depth=8,
-        # # # # num_heads=8,
-        # # # embed_dim=192,
-        # # # enc_depth=18,
-        # # # num_heads=8,
-        # # embed_dim=384,
-        # # enc_depth=12,
-        # # num_heads=8,
-        # embed_dim=768,
-        # enc_depth=12,
-        # num_heads=12,
-        embed_dim=1024,
-        enc_depth=24,
-        num_heads=16,
-        num_frames=dataset_videos.frames_per_clip,
+    model = VJEPA.load_from_checkpoint(
+        "D:/MDX/Thesis/suaijd/jepa/lightning_logs/v-jepa/pretrain/videos/version_1/checkpoints/epoch=1-step=241258.ckpt"
     )
 
     finetune_model = VJEPA_FT(
-        # pretrained_model_path="lightning_logs/v-jepa/pretrain/videos/version_3/checkpoints/epoch=2-step=45234.ckpt",
-        vjepa_model=model,
-        frame_count=8,
-        output_channels=3,
-        output_height=224,
-        output_width=224,
+        vjepa_model=model, frame_count=dataset.frames_per_clip, batch_size=8
     )
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
@@ -336,16 +291,16 @@ if __name__ == "__main__":
     )
 
     # Path to the checkpoint to resume from (use the latest checkpoint if available)
-    checkpoint_path: Optional[str] = None
+    # checkpoint_path: Optional[str] = None
 
-    # Define your checkpoint callback
-    checkpoint_callback = ModelCheckpoint(
-        dirpath="./checkpoints/VJEPA/finetune/videos/",  # Directory to save checkpoints
-        filename="epoch-{epoch:02d}-val_loss-{val_loss:.4f}",  # Naming scheme
-        save_top_k=3,
-        monitor="val_loss",
-        mode="min",
-    )
+    # # Define your checkpoint callback
+    # checkpoint_callback = ModelCheckpoint(
+    #     dirpath="./checkpoints/VJEPA/finetune/videos/",  # Directory to save checkpoints
+    #     filename="epoch-{epoch:02d}-val_loss-{val_loss:.4f}",  # Naming scheme
+    #     save_top_k=3,
+    #     monitor="val_loss",
+    #     mode="min",
+    # )
 
     trainer = pl.Trainer(
         accelerator="gpu",
@@ -355,12 +310,14 @@ if __name__ == "__main__":
         callbacks=[
             lr_monitor,
             model_summary,
-            checkpoint_callback,
+            # checkpoint_callback,
         ],
         logger=logger,
-        val_check_interval=15_000,
+        # val_check_interval=15_000,
     )
 
     trainer.fit(
-        model=finetune_model, datamodule=dataset_videos, ckpt_path=checkpoint_path
+        model=finetune_model,
+        datamodule=dataset,
+        # ckpt_path=checkpoint_path
     )

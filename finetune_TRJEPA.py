@@ -29,8 +29,8 @@ class LambdaLayer(nn.Module):
 class TRJEPA_FT(pl.LightningModule):
     def __init__(
         self,
-        pretrained_model_path,
-        finetune_vjepa_model_path: Optional[str] = None,
+        vjepa_model: VJEPA,
+        finetune_vjepa_model: Optional[VJEPA_FT] = None,
         frame_count: int = 8,
         lr=1e-4,
         weight_decay=0,
@@ -41,8 +41,8 @@ class TRJEPA_FT(pl.LightningModule):
 
         # Set learning parameters
         self.weight_decay = weight_decay
-        self.pretrained_model_path = pretrained_model_path
-        self.finetune_vjepa_model_path = finetune_vjepa_model_path
+        self.pretrained_model = vjepa_model
+        self.finetune_vjepa_model = finetune_vjepa_model
         self.frame_count = frame_count
         self.lr = lr
         self.drop_path = drop_path
@@ -52,12 +52,6 @@ class TRJEPA_FT(pl.LightningModule):
         self.context_aspect_ratio: Number = 1
         self.context_scale: float = 0.85
 
-        # Load the pretrained IJEPA model for video-based architecture
-        self.pretrained_model = VJEPA.load_from_checkpoint(self.pretrained_model_path)
-        if self.finetune_vjepa_model_path is not None:
-            self.finetune_vjepa_model = VJEPA_FT.load_from_checkpoint(
-                self.finetune_vjepa_model_path
-            )
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "static_scene"
         self.pretrained_model.layer_dropout = self.drop_path
@@ -77,41 +71,22 @@ class TRJEPA_FT(pl.LightningModule):
             nn.LayerNorm(self.pretrained_model.embed_dim),
             nn.Linear(
                 self.pretrained_model.embed_dim,
-                np.prod(self.pretrained_model.patch_size),
-            ),
-            nn.Unflatten(
-                1,
                 (
-                    self.pretrained_model.num_frames
-                    // self.pretrained_model.tubelet_size,
-                    self.pretrained_model.img_size[0]
-                    // self.pretrained_model.patch_size[0],
-                    self.pretrained_model.img_size[1]
-                    // self.pretrained_model.patch_size[1],
+                    self.pretrained_model.tubelet_size
+                    * self.pretrained_model.patch_size[0]
+                    * self.pretrained_model.patch_size[1]
+                    * self.channels
                 ),
             ),
-            LambdaLayer(lambda x: x.permute(0, 4, 1, 2, 3)),
-            nn.ReLU(),
-            nn.Conv3d(
-                in_channels=np.prod(self.pretrained_model.patch_size),
-                out_channels=np.prod(self.pretrained_model.patch_size),
-                kernel_size=(3, 1, 1),
-                stride=(1, 1, 1),
-                padding=(1, 0, 0),  # Temporal padding
-            ),  # Temporal convolution
-            nn.ConvTranspose3d(
-                in_channels=np.prod(self.pretrained_model.patch_size),
-                out_channels=3,
-                kernel_size=(
-                    self.pretrained_model.tubelet_size,
-                    self.pretrained_model.patch_size[0],
-                    self.pretrained_model.patch_size[1],
-                ),
-                stride=(
-                    self.pretrained_model.tubelet_size,
-                    self.pretrained_model.patch_size[0],
-                    self.pretrained_model.patch_size[1],
-                ),
+            LambdaLayer(lambda x: x.view(self.batch_size, -1)),
+            LambdaLayer(
+                lambda x: x.reshape(
+                    self.batch_size,
+                    self.channels,
+                    self.pretrained_model.num_frames,
+                    self.pretrained_model.img_size[0],
+                    self.pretrained_model.img_size[1],
+                )
             ),
         )
 
@@ -141,7 +116,8 @@ class TRJEPA_FT(pl.LightningModule):
             (context, target_prediction), dim=1
         )  # (batch_size, num_context_patches + num_target_patches, embed_dim)
 
-        if self.finetune_vjepa_model_path is not None:
+        # NOTE: If finetune_VJEPA is given then use mlp head from that else use our mlp head
+        if self.finetune_vjepa_model is not None:
             temporal_output, _ = self.finetune_vjepa_model.temporal_attention(
                 prediction, prediction, prediction
             )
@@ -208,9 +184,10 @@ class TRJEPA_FT(pl.LightningModule):
         running_accuracy = 0.0
         for clip in batch:
             y = clip
-            x = y[:, :, 0:1, :, :]
+            x = y[:, :, 0:1, :, :]  # Get first frame and stack
             stacked_img = x.repeat(1, 1, self.frame_count, 1, 1)
             y_hat = self(x=stacked_img, random_t=0)
+            # save every 5000th frame to disk
             save_frames_to_folder(
                 video_tensor=y_hat,
                 original_tensor=y,
@@ -343,6 +320,9 @@ if __name__ == "__main__":
     torch.cuda.empty_cache()
     torch.set_float32_matmul_precision("medium")
 
+    ##############################
+    # Load Dataset
+    ##############################
     dataset_path: Path = Path(
         "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
@@ -358,10 +338,25 @@ if __name__ == "__main__":
         num_clips=1,
     )
 
-    model = TRJEPA_FT(
-        lr=1e-3,
-        pretrained_model_path="D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt",
-        finetune_vjepa_model_path=None,
+    ##############################
+    # Load Pretrained models
+    ##############################
+    model = VJEPA.load_from_checkpoint(
+        "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
+    )
+
+    finetune_vjepa_path: Optional[str] = None
+    finetune_vjepa_model: Optional[VJEPA_FT] = None
+
+    if finetune_vjepa_path is not None:
+        finetune_vjepa_model = VJEPA_FT.load_from_checkpoint(finetune_vjepa_path)
+
+    ##############################
+    # Finetune initialisation
+    ##############################
+    finetune_model = TRJEPA_FT(
+        vjepa_model=model,
+        finetune_vjepa_model=finetune_vjepa_model,
         frame_count=dataset.frames_per_clip,
     )
 
