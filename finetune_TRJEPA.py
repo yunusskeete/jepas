@@ -51,6 +51,7 @@ class TRJEPA_FT(pl.LightningModule):
         self.target_scale_interval: float = 0.15
         self.context_aspect_ratio: Number = 1
         self.context_scale: float = 0.85
+        self.channels = 3
 
         self.pretrained_model.mode = "test"
         self.pretrained_model.phase = "static_scene"
@@ -81,7 +82,7 @@ class TRJEPA_FT(pl.LightningModule):
             LambdaLayer(lambda x: x.view(self.batch_size, -1)),
             LambdaLayer(
                 lambda x: x.reshape(
-                    self.batch_size,
+                    x.size(0),
                     self.channels,
                     self.pretrained_model.num_frames,
                     self.pretrained_model.img_size[0],
