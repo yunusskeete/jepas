@@ -37,7 +37,7 @@ class TRJEPA_FT(pl.LightningModule):
         drop_path=0.1,
     ):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["vjepa_model"])
 
         # Set learning parameters
         self.weight_decay = weight_decay
@@ -47,10 +47,6 @@ class TRJEPA_FT(pl.LightningModule):
         self.lr = lr
         self.drop_path = drop_path
 
-        self.target_aspect_ratio: float = 0.75
-        self.target_scale_interval: float = 0.15
-        self.context_aspect_ratio: Number = 1
-        self.context_scale: float = 0.85
         self.channels = 3
 
         self.pretrained_model.mode = "test"
@@ -79,7 +75,7 @@ class TRJEPA_FT(pl.LightningModule):
                     * self.channels
                 ),
             ),
-            LambdaLayer(lambda x: x.view(self.batch_size, -1)),
+            LambdaLayer(lambda x: x.view(x.size(0), -1)),
             LambdaLayer(
                 lambda x: x.reshape(
                     x.size(0),
@@ -97,12 +93,12 @@ class TRJEPA_FT(pl.LightningModule):
     def forward(self, x, random_t):
         ###########################
         # NOTE: this is effectively our video encoder
-        x = self.pretrained_model(
+        x = self.pretrained_model.forward(
             x=x,
-            target_aspect_ratio=self.target_aspect_ratio,
-            target_scale=self.target_scale_interval,
-            context_aspect_ratio=self.context_aspect_ratio,
-            context_scale=self.context_scale,
+            target_aspect_ratio=self.pretrained_model.target_aspect_ratio,
+            target_scale=self.pretrained_model.target_scale_interval,
+            context_aspect_ratio=self.pretrained_model.context_aspect_ratio,
+            context_scale=self.pretrained_model.context_scale,
             static_scene_temporal_reasoning=False,
             use_static_positional_embedding=True,
             random_t=random_t,
@@ -378,4 +374,4 @@ if __name__ == "__main__":
         gradient_clip_val=0.1,
     )
 
-    trainer.fit(model, dataset)
+    trainer.fit(finetune_model, dataset)
