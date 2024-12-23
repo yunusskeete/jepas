@@ -67,16 +67,17 @@ class TRJEPA_FT(pl.LightningModule):
         for param in self.pretrained_model.parameters():
             param.requires_grad = False  # Freeze the pretrained model's parameters
 
-        self.temporal_attention = nn.MultiheadAttention(
-            embed_dim=self.pretrained_model.embed_dim,
-            num_heads=8,  # or suitable number of heads
+        self.target_positional_embedding = nn.Parameter(
+            torch.randn(
+                self.pretrained_model.num_patches, self.pretrained_model.embed_dim
+            )
         )
 
-        self.predictor_embed = (
-            nn.Linear(self.pretrained_model.embed_dim, predictor_embed_dim, bias=True)
-            if predictor_embed_dim
-            else nn.Identity()
-        )
+        # self.predictor_embed = (
+        #     nn.Linear(self.pretrained_model.embed_dim, predictor_embed_dim, bias=True)
+        #     if predictor_embed_dim
+        #     else nn.Identity()
+        # )
 
         self.predictor_norm = (
             nn.LayerNorm(predictor_embed_dim) if predictor_embed_dim else nn.Identity()
@@ -92,6 +93,7 @@ class TRJEPA_FT(pl.LightningModule):
             heads=decoder_heads,
             depth=decoder_depth,
             layer_dropout=self.drop_path,
+            cross_attend=True,
         )
 
         self.mlp_head = nn.Sequential(
@@ -133,10 +135,8 @@ class TRJEPA_FT(pl.LightningModule):
             use_static_positional_embedding=True,
             random_t=random_t,
         )
-        context, target = self.mask_frames(x)
-        x = torch.cat((context, target), dim=1)
-        x = self.predictor_embed(x)
-        x = self.decoder(x)
+        context, target_mask = self.mask_frames(x)
+        x = self.decoder(x=target_mask, context=context)
         x = self.predictor_proj(self.predictor_norm(x))
         #########################
 
@@ -167,34 +167,29 @@ class TRJEPA_FT(pl.LightningModule):
         """
         batch_size, num_patches, embed_dim = x.shape
 
-        # Calculate patches per frame
-        patches_per_frame = int(
-            (self.pretrained_model.img_size[0] / self.pretrained_model.patch_size[0])
-            * (self.pretrained_model.img_size[1] / self.pretrained_model.patch_size[1])
+        # Repeat positional embeddings for each batch
+        positional_embeddings_broadcasted = (
+            self.target_positional_embedding.unsqueeze(0)
+            .repeat(batch_size, 1, 1)
+            .to(self.device)
         )
 
-        # Indices for the first frame and masked frames
-        first_frame_indices = torch.arange(patches_per_frame)
-        masked_frame_indices = torch.arange(patches_per_frame, num_patches)
-
-        # Extract positional embeddings for the first and masked frames
-        first_frame_pos_embedding = self.pretrained_model.pos_embedding[
-            :, first_frame_indices, :
-        ]
-        masked_frame_pos_embedding = (
-            self.pretrained_model.pos_embedding[:, masked_frame_indices, :] + 1.0
-        )  # Add offset for masked positional embeddings
-
-        # First frame tensor: Keep original tensor values with positional embeddings
-        first_frame_tensor = x[:, first_frame_indices, :] + first_frame_pos_embedding
-
-        # Masked frame tensor: Replace with mask token and adjusted positional embeddings
-        mask_token_repeated = self.pretrained_model.mask_token.expand(
-            batch_size, masked_frame_indices.size(0), embed_dim
+        # Create a binary mask (e.g., 1 for masked positions, 0 otherwise)
+        mask = torch.randint(0, 2, (batch_size, num_patches)).bool()
+        mask = mask.to(self.device)
+        # Mask the positional embeddings
+        mask_expanded = mask.unsqueeze(-1).expand_as(positional_embeddings_broadcasted)
+        # Create the masked target tensor
+        masked_target = torch.where(
+            mask_expanded,
+            positional_embeddings_broadcasted,
+            torch.zeros_like(positional_embeddings_broadcasted),
         )
-        masked_frame_tensor = mask_token_repeated + masked_frame_pos_embedding
 
-        return first_frame_tensor, masked_frame_tensor
+        context_tensor = x + positional_embeddings_broadcasted
+        target_tensor = masked_target + positional_embeddings_broadcasted
+
+        return context_tensor, target_tensor
 
     def training_step(self, batch, batch_idx):
         clip: torch.Tensor

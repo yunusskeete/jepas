@@ -82,7 +82,7 @@ class VJEPA_FT(pl.LightningModule):
                     * self.channels
                 ),
             ),
-            LambdaLayer(lambda x: x.view(self.batch_size, -1)),
+            # LambdaLayer(lambda x: x.view(self.batch_size, -1)),
             LambdaLayer(
                 lambda x: x.reshape(
                     self.batch_size,
