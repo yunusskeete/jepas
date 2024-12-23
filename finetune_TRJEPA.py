@@ -10,6 +10,7 @@ import torch.nn as nn
 from PIL import Image
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelSummary
 from pytorch_lightning.loggers import TensorBoardLogger
+from x_transformers import Decoder
 
 from jepa_datasets import VideoDataModule
 from pretrain_VJEPA_static_scene import VJEPA
@@ -33,8 +34,11 @@ class TRJEPA_FT(pl.LightningModule):
         finetune_vjepa_model: Optional[VJEPA_FT] = None,
         frame_count: int = 8,
         lr=1e-4,
-        weight_decay=0,
-        drop_path=0.1,
+        weight_decay: int = 0,
+        drop_path: float = 0.1,
+        decoder_heads: int = 16,
+        decoder_depth: int = 16,
+        predictor_embed_dim: Optional[int] = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["vjepa_model"])
@@ -68,6 +72,28 @@ class TRJEPA_FT(pl.LightningModule):
             num_heads=8,  # or suitable number of heads
         )
 
+        self.predictor_embed = (
+            nn.Linear(self.pretrained_model.embed_dim, predictor_embed_dim, bias=True)
+            if predictor_embed_dim
+            else nn.Identity()
+        )
+
+        self.predictor_norm = (
+            nn.LayerNorm(predictor_embed_dim) if predictor_embed_dim else nn.Identity()
+        )
+        self.predictor_proj = (
+            nn.Linear(predictor_embed_dim, self.pretrained_model.embed_dim, bias=True)
+            if predictor_embed_dim
+            else nn.Identity()
+        )
+
+        self.decoder = Decoder(
+            dim=self.pretrained_model.embed_dim,
+            heads=decoder_heads,
+            depth=decoder_depth,
+            layer_dropout=self.drop_path,
+        )
+
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(self.pretrained_model.embed_dim),
             nn.Linear(
@@ -79,7 +105,7 @@ class TRJEPA_FT(pl.LightningModule):
                     * self.channels
                 ),
             ),
-            LambdaLayer(lambda x: x.view(x.size(0), -1)),
+            # LambdaLayer(lambda x: x.view(x.size(0), -1)),
             LambdaLayer(
                 lambda x: x.reshape(
                     x.size(0),
@@ -108,32 +134,23 @@ class TRJEPA_FT(pl.LightningModule):
             random_t=random_t,
         )
         context, target = self.mask_frames(x)
-        target_prediction = self.pretrained_model.predictor(
-            context_encoding=context, target_masks=target
-        )
+        x = torch.cat((context, target), dim=1)
+        x = self.predictor_embed(x)
+        x = self.decoder(x)
+        x = self.predictor_proj(self.predictor_norm(x))
         #########################
-
-        prediction = torch.cat(
-            (context, target_prediction), dim=1
-        )  # (batch_size, num_context_patches + num_target_patches, embed_dim)
 
         # NOTE: If finetune_VJEPA is given then use mlp head from that else use our mlp head
         if self.finetune_vjepa_model is not None:
-            temporal_output, _ = self.finetune_vjepa_model.temporal_attention(
-                prediction, prediction, prediction
-            )
-            temporal_output = self.finetune_vjepa_model.mlp_head(
-                temporal_output
+            x = self.finetune_vjepa_model.mlp_head(
+                x
             )  # [batch_size, output_channels, frame_count, output_height, output_width]
         else:
-            temporal_output, _ = self.temporal_attention(
-                prediction, prediction, prediction
-            )
-            temporal_output = self.mlp_head(
-                temporal_output
+            x = self.mlp_head(
+                x
             )  # [batch_size, output_channels, frame_count, output_height, output_width]
 
-        return temporal_output
+        return x
 
     def mask_frames(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
