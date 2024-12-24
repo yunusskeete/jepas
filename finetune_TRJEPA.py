@@ -1,4 +1,5 @@
 # pylint: disable=no-value-for-parameter
+from einops import rearrange
 import os
 from pathlib import Path
 from typing import Optional
@@ -10,7 +11,7 @@ import torch.nn as nn
 from PIL import Image
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelSummary
 from pytorch_lightning.loggers import TensorBoardLogger
-from x_transformers import Decoder
+from model.predictor import Predictor
 
 from jepa_datasets import VideoDataModule
 from pretrain_VJEPA_static_scene import VJEPA
@@ -38,7 +39,6 @@ class TRJEPA_FT(pl.LightningModule):
         drop_path: float = 0.1,
         decoder_heads: int = 16,
         decoder_depth: int = 16,
-        predictor_embed_dim: Optional[int] = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["vjepa_model"])
@@ -67,33 +67,17 @@ class TRJEPA_FT(pl.LightningModule):
         for param in self.pretrained_model.parameters():
             param.requires_grad = False  # Freeze the pretrained model's parameters
 
-        self.target_positional_embedding = nn.Parameter(
+        self.pos_embedding = nn.Parameter(
             torch.randn(
-                self.pretrained_model.num_patches, self.pretrained_model.embed_dim
+                1, self.pretrained_model.num_patches, self.pretrained_model.embed_dim
             )
         )
 
-        # self.predictor_embed = (
-        #     nn.Linear(self.pretrained_model.embed_dim, predictor_embed_dim, bias=True)
-        #     if predictor_embed_dim
-        #     else nn.Identity()
-        # )
-
-        self.predictor_norm = (
-            nn.LayerNorm(predictor_embed_dim) if predictor_embed_dim else nn.Identity()
-        )
-        self.predictor_proj = (
-            nn.Linear(predictor_embed_dim, self.pretrained_model.embed_dim, bias=True)
-            if predictor_embed_dim
-            else nn.Identity()
-        )
-
-        self.decoder = Decoder(
-            dim=self.pretrained_model.embed_dim,
-            heads=decoder_heads,
+        self.predictor = Predictor(
+            embed_dim=self.pretrained_model.embed_dim,
+            num_heads=decoder_heads,
             depth=decoder_depth,
             layer_dropout=self.drop_path,
-            cross_attend=True,
         )
 
         self.mlp_head = nn.Sequential(
@@ -135,9 +119,12 @@ class TRJEPA_FT(pl.LightningModule):
             use_static_positional_embedding=True,
             random_t=random_t,
         )
+        # Make masked target from 2-n and add stacked pos embedding to context for 1
         context, target_mask = self.mask_frames(x)
-        x = self.decoder(x=target_mask, context=context)
-        x = self.predictor_proj(self.predictor_norm(x))
+        x = self.predictor(target_masks=target_mask, context_encoding=context)
+        # remake tensor for reconstruction
+        # take 1 from context and concat 2-n target
+        x = self.remake_predicted_tensor(context=context, target=x)
         #########################
 
         # NOTE: If finetune_VJEPA is given then use mlp head from that else use our mlp head
@@ -152,44 +139,98 @@ class TRJEPA_FT(pl.LightningModule):
 
         return x
 
-    def mask_frames(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def pseudo_3d_pos_embedding(self, random_t: int = 0):
+        """
+        Generate pseudo-3D positional embeddings for context and target frames.
+        Args:
+            random_t (int): Index of the frame to use as context.
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Context positional embeddings and target positional embeddings.
+        """
+        t, h, w = self.pretrained_model.patch_embed.patch_shape
+        pos_emb_reshape = rearrange(
+            self.pos_embedding,
+            "b (t h w) e -> b e t h w",
+            t=t,
+            h=h,
+            w=w,
+        )
+
+        # Positional embedding for the selected context frame
+        single_pos_embedding_slice = pos_emb_reshape[:, :, random_t, :, :]
+
+        # Positional embeddings for the rest of the frames
+        rest_frames = torch.cat(
+            [
+                pos_emb_reshape[:, :, :random_t, :, :],
+                pos_emb_reshape[:, :, random_t + 1 :, :, :],
+            ],
+            dim=2,
+        )
+
+        # Expand context frame positional embedding to match all frames
+        pos_emb_stacked = single_pos_embedding_slice.unsqueeze(2).repeat(1, 1, t, 1, 1)
+
+        # Reshape embeddings for context and target
+        context_pos_embed = rearrange(pos_emb_stacked, "b e t h w -> b (t h w) e")
+        target_pos_embed = rearrange(rest_frames, "b e t h w -> b (t h w) e")
+
+        return context_pos_embed, target_pos_embed
+
+    def mask_frames(
+        self, x: torch.Tensor, random_t: int = 0
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Masks all frames except the first one and returns two tensors:
         one for the first frame and another for the masked frames.
 
         Args:
             x (torch.Tensor): Input tensor of shape [batch_size, num_patches, embed_dim].
+            random_t (int): Index of the frame to use as context.
 
         Returns:
-            tuple[torch.Tensor, torch.Tensor]: A tuple containing:
-                - first_frame_tensor: Tensor of the first frame with positional embeddings.
-                - masked_frame_tensor: Tensor of the masked frames with mask tokens and adjusted positional embeddings.
+            tuple[torch.Tensor, torch.Tensor]: Context tensor and target tensor.
         """
         batch_size, num_patches, embed_dim = x.shape
 
-        # Repeat positional embeddings for each batch
-        positional_embeddings_broadcasted = (
-            self.target_positional_embedding.unsqueeze(0)
-            .repeat(batch_size, 1, 1)
-            .to(self.device)
-        )
+        # Generate positional embeddings
+        context_pos_embed, target_pos_embed = self.pseudo_3d_pos_embedding(random_t)
 
-        # Create a binary mask (e.g., 1 for masked positions, 0 otherwise)
-        mask = torch.randint(0, 2, (batch_size, num_patches)).bool()
-        mask = mask.to(self.device)
-        # Mask the positional embeddings
-        mask_expanded = mask.unsqueeze(-1).expand_as(positional_embeddings_broadcasted)
-        # Create the masked target tensor
+        # Create a binary mask: 1 for masked positions, 0 otherwise
+        mask = torch.randint(
+            0, 2, (batch_size, target_pos_embed.size(1)), device=x.device
+        ).bool()
+
+        # Expand mask to match the target tensor's shape
+        mask_expanded = mask.unsqueeze(-1).expand(-1, -1, embed_dim)
+
+        # Apply mask to the target tensor
         masked_target = torch.where(
             mask_expanded,
-            positional_embeddings_broadcasted,
-            torch.zeros_like(positional_embeddings_broadcasted),
+            target_pos_embed,
+            torch.zeros_like(target_pos_embed),
         )
 
-        context_tensor = x + positional_embeddings_broadcasted
-        target_tensor = masked_target + positional_embeddings_broadcasted
+        # Add positional embeddings to the input tensor
+        context_tensor = x + context_pos_embed
+        target_tensor = masked_target + target_pos_embed
 
         return context_tensor, target_tensor
+
+    def remake_predicted_tensor(self, context, target, random_t: int = 0):
+        t, h, w = self.pretrained_model.patch_embed.patch_shape
+        context_reshape = rearrange(
+            context,
+            "b (t h w) e -> b e t h w",
+            t=t,
+            h=h,
+            w=w,
+        )
+
+        context_slice = context_reshape[:, :, random_t, :, :].unsqueeze(2)
+        context_remade = rearrange(context_slice, "b e t h w -> b (t h w) e")
+
+        return torch.cat((context_remade, target), dim=1)
 
     def training_step(self, batch, batch_idx):
         clip: torch.Tensor
