@@ -1,5 +1,6 @@
 from typing import Any, Optional, Tuple, Union
 from einops import rearrange
+import math
 
 import torch
 import torch.nn as nn
@@ -58,7 +59,9 @@ class VisionTransformer(nn.Module):
             torch.prod(torch.Tensor(self.patch_embed.patch_shape)).item()
         )
 
-        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches, embed_dim))
+        self.pos_embedding = self.get_sinusoidal_positional_embedding(
+            seq_len=self.num_patches, dim=embed_dim
+        )
         print(f"{self.pos_embedding.shape=}")
         self.stacked_pos_embedding = None
 
@@ -80,6 +83,38 @@ class VisionTransformer(nn.Module):
         self.post_enc_norm_vit = (
             nn.LayerNorm(embed_dim) if self.post_enc_norm else nn.Identity()
         )  # student encoder
+
+    def get_sinusoidal_positional_embedding(
+        self, seq_len: int, dim: int, device="cuda"
+    ):
+        """
+        Generates sinusoidal positional embeddings for a sequence.
+
+        Each position is encoded as a vector of `dim` dimensions using sine and cosine functions,
+        ensuring smooth, interpretable embeddings that generalize well to unseen sequences.
+
+        Args:
+            seq_len (int): Number of positions in the sequence.
+            dim (int): Dimensionality of the embeddings.
+            device (str): Device for the tensor ('cpu' or 'cuda').
+
+        Returns:
+            torch.Tensor: A tensor of shape (seq_len, dim) with sinusoidal embeddings.
+
+        Example:
+            >>> embedding = get_sinusoidal_embedding(seq_len=392, dim=512, device='gpu')
+            >>> print(embedding.shape)
+            torch.Size([1, 392, 512])
+        """
+        position = torch.arange(seq_len, dtype=torch.float, device=device).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, dim, 2, dtype=torch.float, device=device)
+            * -(math.log(10000.0) / dim)
+        )
+        embedding = torch.zeros(seq_len, dim, device=device)
+        embedding[:, 0::2] = torch.sin(position * div_term)
+        embedding[:, 1::2] = torch.cos(position * div_term)
+        return embedding.unsqueeze(0)  # Add batch dimension
 
     def pseudo_3d_pos_embedding(self, patch_shape, random_t: int):
         """

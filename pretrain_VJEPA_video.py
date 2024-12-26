@@ -29,7 +29,7 @@ if __name__ == "__main__":
         pin_memory=True,
         prefetch_factor=4,
         frame_step=8,
-        num_clips=-1,
+        num_clips=1,
     )
 
     model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)
