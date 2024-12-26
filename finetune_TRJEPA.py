@@ -69,7 +69,9 @@ class TRJEPA_FT(pl.LightningModule):
         (
             self.stacked_context_pos_embedding,
             self.target_pos_embedding,
-        ) = self.generate_new_positional_embeddings()  # [1, num patches, embed dim]
+        ) = self.pretrained_model.generate_new_positional_embeddings(
+            mode="test"
+        )  # [1, num patches, embed dim]
 
         self.mask_token = nn.Parameter(
             torch.randn(1, 1, self.pretrained_model.embed_dim)
@@ -138,107 +140,6 @@ class TRJEPA_FT(pl.LightningModule):
             )  # [batch_size, output_channels, frame_count, output_height, output_width]
 
         return x
-
-    def generate_new_positional_embeddings(self):
-        """
-        Generate two new positional embeddings from the original positional embedding:
-        1. Positional embedding of the first frame stacked `num_frames` times.
-        2. Positional embedding of the rest of the frames (2-n).
-
-        Returns:
-            tuple[torch.Tensor, torch.Tensor]:
-                - Stacked positional embedding of the first frame, shape [1, num frames, embed_dim].
-                - Positional embedding of frames 2 to n, shape [1, num_frames-1, embed_dim].
-        """
-        frame_pos_embedding = self.pretrained_model.get_sinusoidal_positional_embedding(
-            seq_len=self.frame_count, dim=self.pretrained_model.embed_dim
-        )
-        # Extract the number of frames and embedding dimension
-        batch_size, num_frames, embed_dim = frame_pos_embedding.shape
-
-        if num_frames < 2:
-            raise ValueError("Number of frames must be at least 2 to split embeddings.")
-
-        # Positional embedding for the first frame, stacked `num_frames` times
-        first_frame_embedding = frame_pos_embedding[
-            :, 0:1, :
-        ]  # Shape: [1, 1, embed_dim]
-        stacked_first_frame_embedding = repeat(
-            first_frame_embedding, "1 1 e -> 1 n e", n=num_frames
-        )  # Shape: [1, num_frames, embed_dim]
-
-        # Positional embeddings for frames 2 to n
-        rest_frame_embeddings = frame_pos_embedding[
-            :, 1:, :
-        ]  # Shape: [1, num_frames-1, embed_dim]
-
-        stacked_first_frame_embedding = self.get_positional_embedding_3d_convolution(
-            num_patches=self.pretrained_model.num_patches,
-            batch_size=batch_size,
-            frame_pos_embedding=stacked_first_frame_embedding,
-        )
-        rest_frame_embeddings = self.get_positional_embedding_3d_convolution(
-            num_patches=self.pretrained_model.num_patches,
-            batch_size=batch_size,
-            frame_pos_embedding=rest_frame_embeddings,
-        )
-
-        return stacked_first_frame_embedding, rest_frame_embeddings
-
-    def get_positional_embedding_3d_convolution(
-        self,
-        num_patches,
-        batch_size,
-        frame_pos_embedding,
-    ):
-        """
-        Apply frame-level sinusoidal positional embedding to a patch tensor created by 3D convolution.
-
-        Args:
-            patch_tensor (torch.Tensor): Tensor from the pretrained model, shape [batch, num_patches, embed_dim].
-            frame_pos_embedding (torch.Tensor): Frame sinusoidal positional embedding, shape [1, num_frames, embed_dim].
-
-        Returns:
-            torch.Tensor: positional embeddings, shape [batch, num_patches, embed_dim].
-        """
-
-        patch_shape = self.pretrained_model.patch_embed.patch_shape
-        kernel_t = self.pretrained_model.tubelet_size
-        stride_t = self.pretrained_model.tubelet_size
-        padding_t = 0
-
-        t_p, h_p, w_p = patch_shape
-
-        # Ensure the number of patches matches t_p * h_p * w_p
-        if num_patches != t_p * h_p * w_p:
-            raise ValueError(
-                f"Mismatch between num_patches ({num_patches}) and t_p * h_p * w_p ({t_p} * {h_p} * {w_p})."
-            )
-
-        # Map each temporal patch to the corresponding frame index
-        num_frames = frame_pos_embedding.size(1)
-        frame_indices = torch.arange(t_p) * stride_t - padding_t + kernel_t // 2
-        frame_indices = frame_indices.clamp(
-            min=0, max=num_frames - 1
-        )  # Ensure valid indices
-
-        # Gather frame positional embeddings for the temporal patches
-        temporal_pos_embedding = frame_pos_embedding[
-            :, frame_indices, :
-        ]  # Shape: [1, t_p, embed_dim]
-
-        # Repeat temporal embeddings for all spatial patches in each temporal patch
-        patches_per_temporal_patch = h_p * w_p
-        expanded_pos_embedding = temporal_pos_embedding.repeat_interleave(
-            patches_per_temporal_patch, dim=1
-        )  # Shape: [1, num_patches, embed_dim]
-
-        # Broadcast to batch size and add to the patch tensor
-        expanded_pos_embedding = expanded_pos_embedding.expand(
-            batch_size, -1, -1
-        )  # Shape: [batch, num_patches, embed_dim]
-
-        return expanded_pos_embedding
 
     def generate_context_and_masked_target(
         self, x: torch.Tensor, random_t: int = 0
@@ -428,10 +329,9 @@ if __name__ == "__main__":
     ##############################
     # Load Pretrained models
     ##############################
-    # model = VJEPA.load_from_checkpoint(
-    #     "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
-    # )
-    model = VJEPA(lr=1e-3, num_frames=dataset.frames_per_clip)
+    model = VJEPA.load_from_checkpoint(
+        "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
+    )
 
     finetune_vjepa_path: Optional[str] = None
     finetune_vjepa_model: Optional[VJEPA_FT] = None
