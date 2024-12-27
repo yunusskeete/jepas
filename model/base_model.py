@@ -126,6 +126,7 @@ class JEPA_base(VisionTransformer):
         embed_dim: int,
         target_patches: List[List[int]],
         context_encoding: torch.Tensor,
+        use_static_positional_embedding: bool = False,
     ) -> torch.Tensor:
         """
         (Image/video invariant)
@@ -177,7 +178,11 @@ class JEPA_base(VisionTransformer):
             # The `context_encoding` already contains positional encoding from `self.forward_vit()` pass,
             # thus we must add positional embeddings to the targets
 
-            target_masks = target_masks + self.pos_embedding
+            target_masks = target_masks + (
+                self.stacked_pos_embedding
+                if use_static_positional_embedding
+                else self.pos_embedding
+            )
             target_masks = rearrange(target_masks, "b t n e -> b (t n) e")
             target_masks = target_masks[
                 :,  # Include batch dim
