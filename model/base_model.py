@@ -26,7 +26,7 @@ class JEPA_base(VisionTransformer):
         self.num_target_blocks = num_target_blocks
         self.mode = mode.lower()
 
-        self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
+        self.mask_token = nn.Parameter(torch.randn(1, 1))
         nn.init.trunc_normal_(self.mask_token, 0.02)
 
         self.post_enc_norm_jepa = (
@@ -125,6 +125,7 @@ class JEPA_base(VisionTransformer):
         embed_dim: int,
         target_patches: List[List[int]],
         context_encoding: torch.Tensor,
+        use_static_positional_embedding: bool = False,
     ) -> torch.Tensor:
         """
         (Image/video invariant)
@@ -166,18 +167,36 @@ class JEPA_base(VisionTransformer):
             (`target_masks`).
             """
             target_masks: torch.Tensor = self.mask_token.repeat(
-                batch_dim, num_patches, 1
+                batch_dim,
+                self.in_chans * self.num_frames * self.img_size[0] * self.img_size[1],
             )
+
+            target_masks = target_masks + (
+                self.stacked_pos_embedding
+                if use_static_positional_embedding
+                else self.pos_embedding
+            )
+            original_shape = (
+                batch_dim,
+                self.in_chans,
+                self.num_frames,
+                self.img_size[0],
+                self.img_size[1],
+            )
+            target_masks = self.unflatten_video_tensor(
+                flattened_tensor=target_masks,
+                original_shape=original_shape,
+            )
+            target_masks = self.patch_embed(target_masks)
 
             # The target tokens (initialised as `target_masks`) must contain positional information.
             # The `context_encoding` already contains positional encoding from `self.forward_vit()` pass,
             # thus we must add positional embeddings to the targets
-            target_pos_embedding = self.pos_embedding[
+            target_masks = target_masks[
                 :,  # Include batch dim
                 target_patches[target_block_idx],  # Include target patch only
                 :,  # Include all embed dim
             ]
-            target_masks = target_masks + target_pos_embedding
 
             # Generate prediction for the current target block
             prediction_block = self.predictor(
@@ -262,7 +281,6 @@ class JEPA_base(VisionTransformer):
         if isinstance(x, list):
             x = x[0]
         _, _, original_t, _, _ = x.shape
-        random_t = random_t if test_mode else torch.randint(0, original_t, (1,)).item()
         output = self.forward_vit(
             x=x,
             x_stacked=(
@@ -274,7 +292,7 @@ class JEPA_base(VisionTransformer):
                     original_t=original_t,
                 )
             ),
-            random_t=random_t if test_mode else (random_t // self.tubelet_size),
+            random_t=random_t,
             attention_mask=None,
             patch_embed_only=not test_mode,
             static_scene_temporal_reasoning=static_scene_temporal_reasoning,
@@ -336,6 +354,7 @@ class JEPA_base(VisionTransformer):
             embed_dim=embed_dim,
             target_patches=target_patches,
             context_encoding=context_encoding,
+            use_static_positional_embedding=use_static_positional_embedding,
         )  # (num_target_blocks, batch_size, target_block_size, embed_dim)
         num_target_blocks, batch_size, num_prediction_blocks, embed_dim = (
             prediction_blocks.shape

@@ -30,6 +30,7 @@ class VisionTransformer(nn.Module):
         super().__init__()
         self.img_size = ensure_tuple(img_size)
         self.patch_size = ensure_tuple(patch_size)
+        self.in_chans = in_chans
 
         self.num_frames = num_frames
         self.is_video = num_frames > 1
@@ -63,8 +64,8 @@ class VisionTransformer(nn.Module):
             self.stacked_pos_embedding,
             self.pos_embedding,
         ) = self.generate_new_positional_embeddings(
-            mode="train"
-        )  # [1, num patches, embed dim]
+            seq_len=in_chans * num_frames * img_size * img_size, mode="train"
+        )  # [1, (channels * frames * height * width)]
 
         self.post_emb_norm = post_emb_norm
         self.post_emb_norm_vit = (
@@ -85,7 +86,7 @@ class VisionTransformer(nn.Module):
             nn.LayerNorm(embed_dim) if self.post_enc_norm else nn.Identity()
         )  # student encoder
 
-    def generate_new_positional_embeddings(self, mode: str = "train"):
+    def generate_new_positional_embeddings(self, seq_len: int, mode: str = "train"):
         """
         Generate two new positional embeddings from the original positional embedding:
         1. Positional embedding of the first frame stacked `num_frames` times.
@@ -96,128 +97,167 @@ class VisionTransformer(nn.Module):
                 - Stacked positional embedding of the first frame, shape [1, num frames, embed_dim].
                 - Positional embedding of frames 2 to n, shape [1, num_frames-1, embed_dim].
         """
-        frame_pos_embedding = self.get_sinusoidal_positional_embedding(
-            seq_len=self.num_frames, dim=self.embed_dim
-        )
-        # Extract the number of frames and embedding dimension
-        batch_size, num_frames, embed_dim = frame_pos_embedding.shape
-
-        if num_frames < 2:
-            raise ValueError("Number of frames must be at least 2 to split embeddings.")
-
-        # Positional embedding for the first frame, stacked `num_frames` times
-        first_frame_embedding = frame_pos_embedding[
-            :, 0:1, :
-        ]  # Shape: [1, 1, embed_dim]
-        stacked_first_frame_embedding = repeat(
-            first_frame_embedding, "1 1 e -> 1 n e", n=num_frames
-        )  # Shape: [1, num_frames, embed_dim]
+        frame_pos_embedding = self.get_sinusoidal_positional_embedding(seq_len=seq_len)
 
         if mode == "test":
             # Positional embeddings for frames 2 to n
-            frame_pos_embedding = frame_pos_embedding[
-                :, 1:, :
-            ]  # Shape: [1, num_frames-1, embed_dim]
+            n_positional_embedding = self.get_frames_1_to_n_positional_embedding(
+                original_embedding=frame_pos_embedding,
+                frames=self.num_frames,
+                height=self.img_size[0],
+                width=self.img_size[1],
+                channels=self.in_chans,
+            )
 
-        stacked_first_frame_embedding = self.get_positional_embedding_3d_convolution(
-            num_patches=self.num_patches,
-            batch_size=batch_size,
-            frame_pos_embedding=stacked_first_frame_embedding,
+        stacked_first_frame_embedding = self.get_stacked_frame_positional_embedding(
+            original_embedding=frame_pos_embedding,
+            frames=self.num_frames,
+            height=self.img_size[0],
+            width=self.img_size[1],
+            channels=self.in_chans,
         )
-        nonstacked_frame_embeddings = self.get_positional_embedding_3d_convolution(
-            num_patches=self.num_patches,
-            batch_size=batch_size,
-            frame_pos_embedding=frame_pos_embedding,
+
+        frame_pos_embedding = (
+            n_positional_embedding if mode == "test" else frame_pos_embedding
         )
+        return stacked_first_frame_embedding, frame_pos_embedding
 
-        return stacked_first_frame_embedding, nonstacked_frame_embeddings
-
-    def get_sinusoidal_positional_embedding(
-        self, seq_len: int, dim: int, device="cuda"
-    ):
+    def get_sinusoidal_positional_embedding(self, seq_len: int, device="cuda"):
         """
-        Generates sinusoidal positional embeddings for a sequence.
-
-        Each position is encoded as a vector of `dim` dimensions using sine and cosine functions,
-        ensuring smooth, interpretable embeddings that generalize well to unseen sequences.
+        Generate a sinusoidal positional embedding for a flattened video tensor.
+        Each positional embedding is a single value (no embedding dimension).
 
         Args:
-            seq_len (int): Number of positions in the sequence.
-            dim (int): Dimensionality of the embeddings.
-            device (str): Device for the tensor ('cpu' or 'cuda').
+            seq_len (int): The sequence length, which is channels * frames * height * width.
 
         Returns:
-            torch.Tensor: A tensor of shape (seq_len, dim) with sinusoidal embeddings.
-
-        Example:
-            >>> embedding = get_sinusoidal_embedding(seq_len=392, dim=512, device='gpu')
-            >>> print(embedding.shape)
-            torch.Size([1, 392, 512])
+            torch.Tensor: Sinusoidal positional embedding of shape [1, seq_len].
         """
-        position = torch.arange(seq_len, dtype=torch.float, device=device).unsqueeze(1)
+        # Create a tensor of shape [seq_len, 1]
+        position = torch.arange(seq_len, dtype=torch.float, device=device).unsqueeze(
+            1
+        )  # Shape: [seq_len, 1]
+
+        # Define the dimension of the embedding
+        dim = 1  # No embedding dimension as each positional embedding is a single value
+
+        # Compute the sinusoidal functions (sine and cosine) for positional encoding
         div_term = torch.exp(
             torch.arange(0, dim, 2, dtype=torch.float, device=device)
             * -(math.log(10000.0) / dim)
-        )
-        embedding = torch.zeros(seq_len, dim, device=device)
-        embedding[:, 0::2] = torch.sin(position * div_term)
-        embedding[:, 1::2] = torch.cos(position * div_term)
-        return embedding.unsqueeze(0)  # Add batch dimension
+        )  # Shape: [1]
 
-    def get_positional_embedding_3d_convolution(
-        self,
-        num_patches,
-        batch_size,
-        frame_pos_embedding,
+        # Apply sine and cosine to even and odd indices
+        pos_embedding = torch.sin(position * div_term)  # Shape: [seq_len, 1]
+
+        # Add an extra dimension for batch size (1)
+        pos_embedding = pos_embedding.unsqueeze(0).squeeze(-1)  # Shape: [1, seq_len]
+
+        return pos_embedding.to(device=device)
+
+    def get_stacked_frame_positional_embedding(
+        self, original_embedding, frames, height, width, channels
     ):
         """
-        Apply frame-level sinusoidal positional embedding to a patch tensor created by 3D convolution.
+        Generate a positional embedding for a stacked video tensor where the first frame is repeated.
 
         Args:
-            patch_tensor (torch.Tensor): Tensor from the pretrained model, shape [batch, num_patches, embed_dim].
-            frame_pos_embedding (torch.Tensor): Frame sinusoidal positional embedding, shape [1, num_frames, embed_dim].
+            original_embedding (torch.Tensor): The original positional embedding of shape [1, seq_len].
+            frames (int): Number of frames in the video.
+            height (int): Height of each frame.
+            width (int): Width of each frame.
+            channels (int): Number of channels in the video (e.g., RGB).
 
         Returns:
-            torch.Tensor: positional embeddings, shape [batch, num_patches, embed_dim].
+            torch.Tensor: New positional embedding for the stacked video tensor, shape [1, seq_len].
         """
+        # Compute the sequence length (seq_len = channels * frames * height * width)
+        seq_len = channels * frames * height * width
+        _, original_seq_len = original_embedding.shape
+        assert (
+            original_seq_len == seq_len
+        ), f"Sequence length of the original embedding ({original_seq_len}) does not match expected seq_len ({seq_len})."
 
-        patch_shape = self.patch_embed.patch_shape
-        kernel_t = self.tubelet_size
-        stride_t = self.tubelet_size
-        padding_t = 0
+        # Number of patches per frame (considering channels)
+        num_patches = channels * height * width
 
-        t_p, h_p, w_p = patch_shape
+        # Extract positional embedding for the first frame (the first `num_patches` elements)
+        first_frame_embedding = original_embedding[
+            :, :num_patches
+        ]  # Shape: [1, num_patches]
 
-        # Ensure the number of patches matches t_p * h_p * w_p
-        if num_patches != t_p * h_p * w_p:
-            raise ValueError(
-                f"Mismatch between num_patches ({num_patches}) and t_p * h_p * w_p ({t_p} * {h_p} * {w_p})."
-            )
+        # Repeat the first frame embedding across the temporal dimension (frames)
+        stacked_embedding = first_frame_embedding.repeat(
+            1, frames
+        )  # Shape: [1, frames * num_patches]
 
-        # Map each temporal patch to the corresponding frame index
-        num_frames = frame_pos_embedding.size(1)
-        frame_indices = torch.arange(t_p) * stride_t - padding_t + kernel_t // 2
-        frame_indices = frame_indices.clamp(
-            min=0, max=num_frames - 1
-        )  # Ensure valid indices
+        return stacked_embedding
 
-        # Gather frame positional embeddings for the temporal patches
-        temporal_pos_embedding = frame_pos_embedding[
-            :, frame_indices, :
-        ]  # Shape: [1, t_p, embed_dim]
+    def get_frames_1_to_n_positional_embedding(
+        self, original_embedding, frames, height, width, channels
+    ):
+        """
+        Extract positional embedding for frames 1 to n (excluding the first frame).
 
-        # Repeat temporal embeddings for all spatial patches in each temporal patch
-        patches_per_temporal_patch = h_p * w_p
-        expanded_pos_embedding = temporal_pos_embedding.repeat_interleave(
-            patches_per_temporal_patch, dim=1
-        )  # Shape: [1, num_patches, embed_dim]
+        Args:
+            original_embedding (torch.Tensor): The original positional embedding of shape [1, seq_len].
+            frames (int): Total number of frames in the video.
+            height (int): Height of each frame.
+            width (int): Width of each frame.
+            channels (int): Number of channels in the video (e.g., RGB).
 
-        # Broadcast to batch size and add to the patch tensor
-        expanded_pos_embedding = expanded_pos_embedding.expand(
-            batch_size, -1, -1
-        )  # Shape: [batch, num_patches, embed_dim]
+        Returns:
+            torch.Tensor: Positional embedding for frames 1 to n, shape [1, seq_len'],
+                            where seq_len' = (frames - 1) * height * width * channels.
+        """
+        # Compute the sequence length (seq_len = channels * frames * height * width)
+        seq_len = channels * frames * height * width
+        _, original_seq_len = original_embedding.shape
+        assert (
+            original_seq_len == seq_len
+        ), f"Sequence length of the original embedding ({original_seq_len}) does not match expected seq_len ({seq_len})."
 
-        return expanded_pos_embedding
+        # Number of patches per frame (considering channels)
+        num_patches = channels * height * width
+
+        # Slice the embedding for frames 1 to n (excluding the first frame)
+        frames_1_to_n_embedding = original_embedding[
+            :, num_patches:
+        ]  # Shape: [1, (frames - 1) * num_patches]
+
+        return frames_1_to_n_embedding
+
+    def flatten_video_tensor(self, video_tensor):
+        """
+        Flatten a video tensor into a sequence format for positional embeddings.
+
+        Args:
+            video_tensor (torch.Tensor): Input tensor of shape [batch_size, channels, frames, height, width].
+
+        Returns:
+            torch.Tensor: Flattened tensor of shape [batch_size, seq_len, embed_dim].
+            tuple: Original shape for unflattening later.
+        """
+        original_shape = video_tensor.shape  # Save original shape for unflattening
+        batch_size, channels, frames, height, width = original_shape
+        seq_len = channels * frames * height * width
+
+        # Flatten the spatial-temporal dimensions into a sequence
+        flattened = video_tensor.view(batch_size, seq_len)
+        return flattened, original_shape
+
+    def unflatten_video_tensor(self, flattened_tensor, original_shape):
+        """
+        Unflatten a flattened tensor back to the original video tensor shape.
+
+        Args:
+            flattened_tensor (torch.Tensor): Flattened tensor of shape [batch_size, seq_len].
+            original_shape (tuple): The original shape of the video tensor.
+
+        Returns:
+            torch.Tensor: Unflattened tensor of shape [batch_size, channels, frames, height, width].
+        """
+        return flattened_tensor.view(original_shape)
 
     def forward_vit(
         self,
@@ -230,20 +270,33 @@ class VisionTransformer(nn.Module):
         use_static_positional_embedding: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
-        # Obtain patch embeddings from the input tensor
-        x_embed = self.patch_embed(x)  # (batch, num_patches, embed_dim)
-
         if static_scene_temporal_reasoning and x_stacked is not None:
+            flattened_x_stacked, original_stacked_shape = self.flatten_video_tensor(
+                video_tensor=x_stacked
+            )
+            flattened_x_stacked = flattened_x_stacked + self.stacked_pos_embedding
+            x_stacked = self.unflatten_video_tensor(
+                flattened_tensor=flattened_x_stacked,
+                original_shape=original_stacked_shape,
+            )
             x_stacked = self.patch_embed(x_stacked)
-            x_stacked = x_stacked + self.stacked_pos_embedding
             x_stacked = self.post_emb_norm_vit(x_stacked)
 
+        flattened_x, original_shape = self.flatten_video_tensor(video_tensor=x)
         if use_static_positional_embedding:
-            x_embed = x_embed + self.stacked_pos_embedding
+            flattened_x = flattened_x + self.stacked_pos_embedding
         else:
             # Add positional embeddings to the patch embeddings
-            x_embed = x_embed + self.pos_embedding  # (batch, num_patches, embed_dim)
+            flattened_x = (
+                flattened_x + self.pos_embedding
+            )  # (batch, num_patches, embed_dim)
 
+        x = self.unflatten_video_tensor(
+            flattened_tensor=flattened_x, original_shape=original_shape
+        )
+
+        # Obtain patch embeddings from the input tensor
+        x_embed = self.patch_embed(x)  # (batch, num_patches, embed_dim)
         # Normalize the patch embeddings (if `self.post_emb_norm`)
         x_embed = self.post_emb_norm_vit(x_embed)  # (batch, num_patches, embed_dim)
 

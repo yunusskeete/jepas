@@ -70,12 +70,14 @@ class TRJEPA_FT(pl.LightningModule):
             self.stacked_context_pos_embedding,
             self.target_pos_embedding,
         ) = self.pretrained_model.generate_new_positional_embeddings(
-            mode="test"
-        )  # [1, num patches, embed dim]
+            seq_len=self.pretrained_model.in_chans
+            * self.pretrained_model.num_frames
+            * self.pretrained_model.img_size[0]
+            * self.pretrained_model.img_size[1],
+            mode="train",
+        )  # [1, (channels * frames * height * width)]
 
-        self.mask_token = nn.Parameter(
-            torch.randn(1, 1, self.pretrained_model.embed_dim)
-        )
+        self.mask_token = nn.Parameter(torch.randn(1, 1))
         nn.init.trunc_normal_(self.mask_token, 0.02)
 
         self.predictor = Predictor(
@@ -125,8 +127,8 @@ class TRJEPA_FT(pl.LightningModule):
             random_t=random_t,
         )
         # Make masked target from 2-n and add stacked pos embedding to context for 1
-        context, target_mask = self.generate_context_and_masked_target(x)
-        x = self.predictor(target_masks=target_mask, context_encoding=context)
+        target_mask = self.generate_context_and_masked_target(x)
+        x = self.predictor(target_masks=target_mask, context_encoding=x)
         #########################
 
         # NOTE: If finetune_VJEPA is given then use mlp head from that else use our mlp head
@@ -157,14 +159,30 @@ class TRJEPA_FT(pl.LightningModule):
         """
         batch_size, num_patches, embed_dim = x.shape
 
-        target_masks: torch.Tensor = self.mask_token.repeat(batch_size, num_patches, 1)
-
-        # Add positional embeddings to the input tensor
-        context_tensor = x + self.stacked_context_pos_embedding
+        target_masks: torch.Tensor = self.mask_token.repeat(
+            batch_size,
+            self.pretrained_model.in_chans
+            * self.pretrained_model.num_frames
+            * self.pretrained_model.img_size[0]
+            * self.pretrained_model.img_size[1],
+        )
 
         target_tensor = target_masks + self.target_pos_embedding
 
-        return context_tensor, target_tensor
+        original_shape = (
+            batch_size,
+            self.pretrained_model.in_chans,
+            self.pretrained_model.num_frames,
+            self.pretrained_model.img_size[0],
+            self.pretrained_model.img_size[1],
+        )
+        target_tensor = self.pretrained_model.unflatten_video_tensor(
+            flattened_tensor=target_tensor,
+            original_shape=original_shape,
+        )
+        target_tensor = self.pretrained_model.patch_embed(target_tensor)
+
+        return target_tensor
 
     def training_step(self, batch, batch_idx):
         clip: torch.Tensor
