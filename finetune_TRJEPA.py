@@ -69,7 +69,13 @@ class TRJEPA_FT(pl.LightningModule):
 
         self.pos_embedding = nn.Parameter(
             torch.randn(
-                1, self.pretrained_model.num_patches, self.pretrained_model.embed_dim
+                1,
+                self.pretrained_model.patch_embed.patch_shape[0],
+                (
+                    self.pretrained_model.patch_embed.patch_shape[1]
+                    * self.pretrained_model.patch_embed.patch_shape[2]
+                ),
+                self.pretrained_model.embed_dim,
             )
         )
 
@@ -124,7 +130,7 @@ class TRJEPA_FT(pl.LightningModule):
         x = self.predictor(target_masks=target_mask, context_encoding=context)
         # remake tensor for reconstruction
         # take 1 from context and concat 2-n target
-        x = self.remake_predicted_tensor(context=context, target=x)
+        # x = self.remake_predicted_tensor(context=context, target=x)
         #########################
 
         # NOTE: If finetune_VJEPA is given then use mlp head from that else use our mlp head
@@ -148,32 +154,25 @@ class TRJEPA_FT(pl.LightningModule):
             tuple[torch.Tensor, torch.Tensor]: Context positional embeddings and target positional embeddings.
         """
         t, h, w = self.pretrained_model.patch_embed.patch_shape
-        pos_emb_reshape = rearrange(
-            self.pos_embedding,
-            "b (t h w) e -> b e t h w",
-            t=t,
-            h=h,
-            w=w,
-        )
 
         # Positional embedding for the selected context frame
-        single_pos_embedding_slice = pos_emb_reshape[:, :, random_t, :, :]
+        single_pos_embedding_slice = self.pos_embedding[:, random_t, :, :]
 
         # Positional embeddings for the rest of the frames
         rest_frames = torch.cat(
             [
-                pos_emb_reshape[:, :, :random_t, :, :],
-                pos_emb_reshape[:, :, random_t + 1 :, :, :],
+                self.pos_embedding[:, :random_t, :, :],
+                self.pos_embedding[:, random_t + 1 :, :, :],
             ],
-            dim=2,
+            dim=1,
         )
 
         # Expand context frame positional embedding to match all frames
-        pos_emb_stacked = single_pos_embedding_slice.unsqueeze(2).repeat(1, 1, t, 1, 1)
+        pos_emb_stacked = single_pos_embedding_slice.unsqueeze(1).repeat(1, t, 1, 1)
 
         # Reshape embeddings for context and target
-        context_pos_embed = rearrange(pos_emb_stacked, "b e t h w -> b (t h w) e")
-        target_pos_embed = rearrange(rest_frames, "b e t h w -> b (t h w) e")
+        context_pos_embed = pos_emb_stacked
+        target_pos_embed = self.pos_embedding
 
         return context_pos_embed, target_pos_embed
 
@@ -198,11 +197,17 @@ class TRJEPA_FT(pl.LightningModule):
 
         # Create a binary mask: 1 for masked positions, 0 otherwise
         mask = torch.randint(
-            0, 2, (batch_size, target_pos_embed.size(1)), device=x.device
+            0,
+            2,
+            (batch_size, target_pos_embed.size(1) * target_pos_embed.size(2)),
+            device=x.device,
         ).bool()
 
         # Expand mask to match the target tensor's shape
         mask_expanded = mask.unsqueeze(-1).expand(-1, -1, embed_dim)
+        mask_expanded = rearrange(
+            mask_expanded, "b (t n) e -> b t n e", t=target_pos_embed.size(1)
+        )
 
         # Apply mask to the target tensor
         masked_target = torch.where(
@@ -211,9 +216,17 @@ class TRJEPA_FT(pl.LightningModule):
             torch.zeros_like(target_pos_embed),
         )
 
+        x = rearrange(
+            x,
+            "b (t n) e -> b t n e",
+            t=self.pretrained_model.patch_embed.patch_shape[0],
+        )
+
         # Add positional embeddings to the input tensor
         context_tensor = x + context_pos_embed
         target_tensor = masked_target + target_pos_embed
+        context_tensor = rearrange(context_tensor, "b t n e -> b (t n) e")
+        target_tensor = rearrange(target_tensor, "b t n e -> b (t n) e")
 
         return context_tensor, target_tensor
 
@@ -395,9 +408,10 @@ if __name__ == "__main__":
     ##############################
     # Load Pretrained models
     ##############################
-    model = VJEPA.load_from_checkpoint(
-        "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
-    )
+    # model = VJEPA.load_from_checkpoint(
+    #     "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
+    # )
+    model = VJEPA(lr=1e-3, num_frames=dataset.frames_per_clip)
 
     finetune_vjepa_path: Optional[str] = None
     finetune_vjepa_model: Optional[VJEPA_FT] = None

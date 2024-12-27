@@ -58,7 +58,14 @@ class VisionTransformer(nn.Module):
             torch.prod(torch.Tensor(self.patch_embed.patch_shape)).item()
         )
 
-        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches, embed_dim))
+        self.pos_embedding = nn.Parameter(
+            torch.randn(
+                1,
+                self.patch_embed.patch_shape[0],
+                (self.patch_embed.patch_shape[1] * self.patch_embed.patch_shape[2]),
+                embed_dim,
+            )
+        )
         print(f"{self.pos_embedding.shape=}")
         self.stacked_pos_embedding = None
 
@@ -98,31 +105,22 @@ class VisionTransformer(nn.Module):
             Updates `self.stacked_pos_embedding` with the reshaped and stacked positional embedding.
         """
         t, h, w = patch_shape
-        pos_emb_reshape = rearrange(
-            self.pos_embedding,
-            "b (t h w) e -> b e t h w",
-            t=t,
-            h=h,
-            w=w,
-        )
 
-        single_pos_embedding_slice = pos_emb_reshape[:, :, random_t, :, :]
+        single_pos_embedding_slice = self.pos_embedding[:, random_t, :, :]
 
         assert torch.equal(
-            single_pos_embedding_slice, pos_emb_reshape[:, :, random_t, :, :]
+            single_pos_embedding_slice, self.pos_embedding[:, random_t, :, :]
         ), "Not correct positional embedding slice"
 
-        single_t_slice_reshaped = single_pos_embedding_slice.unsqueeze(2)
+        single_t_slice_reshaped = single_pos_embedding_slice.unsqueeze(1)
 
-        pos_emb_stacked = single_t_slice_reshaped.repeat(1, 1, t, 1, 1)
+        pos_emb_stacked = single_t_slice_reshaped.repeat(1, t, 1, 1)
 
         assert (
-            pos_emb_stacked.shape == pos_emb_reshape.shape
+            pos_emb_stacked.shape == self.pos_embedding.shape
         ), "Shape of stacked positional embedding not correct"
 
-        self.stacked_pos_embedding = rearrange(
-            pos_emb_stacked, "1 e t h w -> 1 (t h w) e"
-        )
+        self.stacked_pos_embedding = pos_emb_stacked
 
     def forward_vit(
         self,
@@ -136,7 +134,7 @@ class VisionTransformer(nn.Module):
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         # Obtain patch embeddings from the input tensor
-        x_embed = self.patch_embed(x)  # (batch, num_patches, embed_dim)
+        x_embed = self.patch_embed(x)  # (batch, t, num_patches, embed_dim)
 
         if static_scene_temporal_reasoning and x_stacked is not None:
             x_stacked = self.patch_embed(x_stacked)
@@ -146,6 +144,7 @@ class VisionTransformer(nn.Module):
                 random_t=random_t,
             )
             x_stacked = x_stacked + self.stacked_pos_embedding
+            x_stacked = rearrange(x_stacked, "b t n e -> b (t n) e")
             x_stacked = self.post_emb_norm_vit(x_stacked)
 
         if use_static_positional_embedding:
@@ -157,6 +156,7 @@ class VisionTransformer(nn.Module):
         else:
             # Add positional embeddings to the patch embeddings
             x_embed = x_embed + self.pos_embedding  # (batch, num_patches, embed_dim)
+        x_embed = rearrange(x_embed, "b t n e -> b (t n) e")
 
         # Normalize the patch embeddings (if `self.post_emb_norm`)
         x_embed = self.post_emb_norm_vit(x_embed)  # (batch, num_patches, embed_dim)

@@ -95,7 +95,10 @@ class Predictor(nn.Module):
         )
 
     def forward(
-        self, context_encoding: torch.Tensor, target_masks: torch.Tensor
+        self,
+        context_encoding: torch.Tensor,
+        target_masks: torch.Tensor,
+        device: str = "cuda",
     ) -> torch.Tensor:
         """
         Forward pass to predict the embeddings of target patches from context patches.

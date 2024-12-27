@@ -1,5 +1,6 @@
 import copy
 import os
+from einops import rearrange
 from typing import Any, List, Literal, Optional, Set, Tuple, Union
 
 import torch
@@ -166,18 +167,23 @@ class JEPA_base(VisionTransformer):
             (`target_masks`).
             """
             target_masks: torch.Tensor = self.mask_token.repeat(
-                batch_dim, num_patches, 1
+                batch_dim,
+                self.patch_embed.patch_shape[0],
+                (self.patch_embed.patch_shape[1] * self.patch_embed.patch_shape[2]),
+                1,
             )
 
             # The target tokens (initialised as `target_masks`) must contain positional information.
             # The `context_encoding` already contains positional encoding from `self.forward_vit()` pass,
             # thus we must add positional embeddings to the targets
-            target_pos_embedding = self.pos_embedding[
+
+            target_masks = target_masks + self.pos_embedding
+            target_masks = rearrange(target_masks, "b t n e -> b (t n) e")
+            target_masks = target_masks[
                 :,  # Include batch dim
                 target_patches[target_block_idx],  # Include target patch only
                 :,  # Include all embed dim
             ]
-            target_masks = target_masks + target_pos_embedding
 
             # Generate prediction for the current target block
             prediction_block = self.predictor(

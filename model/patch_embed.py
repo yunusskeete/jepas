@@ -167,6 +167,6 @@ class PatchEmbed3D(nn.Module):
         x = self.conv(x)
 
         # Flatten the patches into a sequence
-        x = rearrange(x, "b e t h w -> b (t h w) e")
+        x = rearrange(x, "b e t h w -> b t (h w) e")
 
-        return x  # (b n e)
+        return x  # (b t n e)

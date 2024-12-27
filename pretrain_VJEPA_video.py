@@ -14,22 +14,23 @@ from jepa_datasets import VideoDataModule
 from model import VJEPA
 
 if __name__ == "__main__":
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
     torch.set_float32_matmul_precision("medium")
 
     dataset_path: Path = Path(
-        "/mnt/data/video/kinetics-dataset/k400"
+        "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
     dataset_videos = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=16,
+        batch_size=8,
         frames_per_clip=8,
         num_workers=os.cpu_count() // 2,
-        pin_memory=True,
         prefetch_factor=4,
         frame_step=8,
-        num_clips=-1,
+        pin_memory=True,
+        num_clips=1,
     )
 
     model = VJEPA(lr=1e-3, num_frames=dataset_videos.frames_per_clip)
