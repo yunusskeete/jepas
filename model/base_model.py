@@ -347,6 +347,7 @@ class JEPA_base(VisionTransformer):
             embed_dim=embed_dim,
             target_patches=target_patches,
             context_encoding=context_encoding,
+            use_static_positional_embedding=use_static_positional_embedding,
         )  # (num_target_blocks, batch_size, target_block_size, embed_dim)
         num_target_blocks, batch_size, num_prediction_blocks, embed_dim = (
             prediction_blocks.shape
