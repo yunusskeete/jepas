@@ -2,7 +2,7 @@
 from einops import rearrange
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
@@ -298,15 +298,29 @@ class TRJEPA_FT(pl.LightningModule):
 
         running_accuracy /= len(batch)
         running_loss /= len(batch)
-        self.log("train_accuracy", running_accuracy)
-        self.log("train_loss", running_loss)
+        self.log("val_accuracy", running_accuracy)
+        self.log("val_loss", running_loss)
         return running_loss
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
+    def configure_optimizers(
+        self,
+    ) -> Dict[str, Union[Callable, Dict[str, Union[str, Callable]]]]:
+        optimizer: Callable = torch.optim.AdamW(
             self.parameters(), lr=self.lr, weight_decay=self.weight_decay
         )
-        return optimizer
+        scheduler: Callable = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=self.lr,
+            total_steps=self.trainer.estimated_stepping_batches,
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+            },
+        }
 
 
 def save_frames_to_folder(video_tensor, original_tensor, folder_name, batch_idx):
@@ -391,7 +405,7 @@ if __name__ == "__main__":
     # Load Dataset
     ##############################
     dataset_path: Path = Path(
-        "E:/ahmad/kinetics-dataset/k400"
+        "E:/ahmad/kinetics-dataset/extrasmall"
     ).resolve()  # Path to Kinetics dataset
 
     dataset = VideoDataModule(
