@@ -1,10 +1,9 @@
 # pylint: disable=no-value-for-parameter
-from einops import rearrange
 import os
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Union
+from einops import rearrange
 
-import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -41,7 +40,7 @@ class TRJEPA_FT(pl.LightningModule):
         decoder_depth: int = 16,
     ):
         super().__init__()
-        self.save_hyperparameters(ignore=["vjepa_model"])
+        self.save_hyperparameters()
 
         # Set learning parameters
         self.weight_decay = weight_decay
@@ -65,7 +64,7 @@ class TRJEPA_FT(pl.LightningModule):
 
         # Freeze all parameters in the pretrained model (backbone)
         for param in self.pretrained_model.parameters():
-            param.requires_grad = False  # Freeze the pretrained model's parameters
+            param.requires_grad = True  # Un-Freeze the pretrained model's parameters
 
         self.pos_embedding = nn.Parameter(
             torch.randn(
@@ -420,12 +419,12 @@ if __name__ == "__main__":
     )
 
     ##############################
-    # Load Pretrained models
+    # Load Pretrained TRJEPA model
     ##############################
-    # model = VJEPA.load_from_checkpoint(
-    #     "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
-    # )
-    model = VJEPA(lr=1e-3, num_frames=dataset.frames_per_clip)
+    model = VJEPA.load_from_checkpoint(
+        "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
+    )
+    # model = VJEPA(lr=1e-3, num_frames=dataset.frames_per_clip)
 
     finetune_vjepa_path: Optional[str] = None
     finetune_vjepa_model: Optional[VJEPA_FT] = None
@@ -447,7 +446,7 @@ if __name__ == "__main__":
 
     logger = TensorBoardLogger(
         "lightning_logs",
-        name="v-jepa/finetune/static/",
+        name="v-jepa/finetune/tr/",
     )
 
     trainer = pl.Trainer(
