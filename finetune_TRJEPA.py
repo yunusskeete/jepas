@@ -441,6 +441,10 @@ if __name__ == "__main__":
         frame_count=dataset.frames_per_clip,
     )
 
+    finetune_trjepa_path: Optional[str] = None
+    if finetune_trjepa_path is not None:
+        finetune_model = TRJEPA_FT.load_from_checkpoint(finetune_trjepa_path)
+
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
 
