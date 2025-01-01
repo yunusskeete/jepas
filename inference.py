@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from decord import VideoReader, cpu
 import torch
@@ -17,13 +18,23 @@ VIDEO_PATH: str = (
 )
 
 
-def render_tensor_as_frames(tensor):
+def render_tensor_as_frames(tensor, folder_name, type):
     """
     Render a tensor of shape [1, channels, frames, height, width] as frames in the notebook.
 
     Args:
         tensor: Input tensor with shape [1, channels, frames, height, width].
     """
+
+    original_video_folder = os.path.join(folder_name, "original")
+    stacked_image_folder = os.path.join(folder_name, "stacked")
+    prediciton_folder = os.path.join(folder_name, "prediction")
+
+    # Create directories if they don't exist
+    os.makedirs(original_video_folder, exist_ok=True)
+    os.makedirs(stacked_image_folder, exist_ok=True)
+    os.makedirs(prediciton_folder, exist_ok=True)
+
     # Remove the batch dimension
     tensor = tensor.squeeze(0)  # Shape: [channels, frames, height, width]
     tensor = tensor.cpu()
@@ -41,11 +52,21 @@ def render_tensor_as_frames(tensor):
         )  # Convert to PIL Image
 
         # Plot the frame
-        plt.figure(figsize=(5, 5))
-        plt.imshow(original_pil_image)
-        plt.title(f"Frame {i+1}")
-        plt.axis("off")
-        plt.show()
+        # plt.figure(figsize=(5, 5))
+        # plt.imshow(original_pil_image)
+        # plt.title(f"Frame {i+1}")
+        # plt.axis("off")
+        # plt.show()
+        # Save the frames as PNG images
+        folder_name = None
+        if type == "original":
+            folder_name = original_video_folder
+        if type == "stacked":
+            folder_name = stacked_image_folder
+        if type == "prediction":
+            folder_name = prediciton_folder
+
+        original_pil_image.save(os.path.join(folder_name, f"frame_{i+1}.png"))
 
 
 def load_video_with_decord(video_path, transform, max_frames=None):
@@ -109,7 +130,7 @@ original_video = load_video_with_decord(
 )
 print(f"Tensor shape: {original_video.shape}")
 
-render_tensor_as_frames(original_video)
+render_tensor_as_frames(original_video, folder_name="inference", type="original")
 
 ##############################
 # Get first frame and stack
@@ -118,7 +139,7 @@ x = original_video[:, :, 0:1, :, :]  # Get first frame and stack
 stacked_img = x.repeat(1, 1, FRAMES_PER_CLIP, 1, 1)
 print(f"{stacked_img.shape=}")
 
-render_tensor_as_frames(stacked_img)
+render_tensor_as_frames(stacked_img, folder_name="inference", type="stacked")
 
 ##############################
 # Load Pretrained TRJEPA model
@@ -153,7 +174,7 @@ if finetune_trjepa_path is not None:
     )
 
 result = finetune_model(x=stacked_img, random_t=0)
-render_tensor_as_frames(tensor=result)
+render_tensor_as_frames(tensor=result, folder_name="inference", type="prediction")
 
 loss = finetune_model.criterion(result, original_video)  # calculate loss
 accuracy = (result.argmax(dim=1) == original_video.argmax(dim=1)).float().mean()

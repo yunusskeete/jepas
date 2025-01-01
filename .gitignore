@@ -12,6 +12,7 @@ JEPA.drawio
 *.ipynb
 !t.ipynb
 finetune/
+inference/
 profiling/
 mid_epoch_checkpoints/
 
