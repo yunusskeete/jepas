@@ -421,10 +421,10 @@ if __name__ == "__main__":
     ##############################
     # Load Pretrained TRJEPA model
     ##############################
-    model = VJEPA.load_from_checkpoint(
-        "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
-    )
-    # model = VJEPA(lr=1e-3, num_frames=dataset.frames_per_clip)
+    # model = VJEPA.load_from_checkpoint(
+    #     "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/pretrain/static_scene/version_6/checkpoints/epoch=2-step=90474.ckpt"
+    # )
+    model = VJEPA(lr=1e-3, num_frames=dataset.frames_per_clip)
 
     finetune_vjepa_path: Optional[str] = None
     finetune_vjepa_model: Optional[VJEPA_FT] = None
@@ -441,9 +441,16 @@ if __name__ == "__main__":
         frame_count=dataset.frames_per_clip,
     )
 
-    finetune_trjepa_path: Optional[str] = None
+    finetune_trjepa_path: Optional[str] = (
+        "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/finetune/static/version_1/checkpoints/epoch=4-step=625.ckpt"
+    )
     if finetune_trjepa_path is not None:
-        finetune_model = TRJEPA_FT.load_from_checkpoint(finetune_trjepa_path)
+        finetune_model = TRJEPA_FT.load_from_checkpoint(
+            finetune_trjepa_path,
+            vjepa_model=model,
+            finetune_vjepa_model=finetune_vjepa_model,
+            frame_count=dataset.frames_per_clip,
+        )
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
