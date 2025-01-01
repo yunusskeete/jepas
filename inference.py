@@ -116,7 +116,7 @@ render_tensor_as_frames(original_video)
 ##############################
 x = original_video[:, :, 0:1, :, :]  # Get first frame and stack
 stacked_img = x.repeat(1, 1, FRAMES_PER_CLIP, 1, 1)
-stacked_img.shape
+print(f"{stacked_img.shape=}")
 
 render_tensor_as_frames(stacked_img)
 
