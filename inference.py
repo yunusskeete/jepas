@@ -14,7 +14,7 @@ from finetune_TRJEPA import TRJEPA_FT
 
 FRAMES_PER_CLIP: int = 8
 VIDEO_PATH: str = (
-    "E:/ahmad/kinetics-dataset/extrasmall/val/part_0/0uSu_3yu_44_000012_000022.mp4"
+    "E:/ahmad/kinetics-dataset/extrasmall/val/part_0/0a8T8M0gt20_000314_000324.mp4"
 )
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -105,36 +105,27 @@ def load_video_with_decord(video_path, transform=None, max_frames=None, frame_st
 
 
 # Define transforms
-def make_transforms(
-    random_horizontal_flip,
-    random_resize_aspect_ratio,
-    random_resize_scale,
-    reprob,
-    auto_augment,
-    motion_shift,
-    crop_size,
-):
+def make_transforms(crop_size=224):
+    """
+    Creates a transform pipeline for training or inference.
+
+    Args:
+        crop_size (int): The final crop size.
+
+    Returns:
+        T.Compose: The transformation pipeline.
+    """
     transforms = [
-        T.Resize((crop_size, crop_size)),  # Resize to (crop_size, crop_size)
-        T.RandomHorizontalFlip(
-            p=0.5 if random_horizontal_flip else 0.0
-        ),  # Horizontal flip
+        T.Resize((crop_size, crop_size)),  # Deterministic resize for inference
         T.Normalize(
             mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
         ),  # Normalization
     ]
+
     return T.Compose(transforms)
 
 
-transform = make_transforms(
-    random_horizontal_flip=True,
-    random_resize_aspect_ratio=[3 / 4, 4 / 3],
-    random_resize_scale=[0.3, 1.0],
-    reprob=0.0,
-    auto_augment=False,
-    motion_shift=False,
-    crop_size=224,
-)
+transform = make_transforms(crop_size=224)
 
 # Load video and apply transforms
 original_video = load_video_with_decord(
