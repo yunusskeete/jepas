@@ -96,7 +96,6 @@ class TRJEPA_FT(pl.LightningModule):
                     * self.channels
                 ),
             ),
-            # LambdaLayer(lambda x: x.view(x.size(0), -1)),
             LambdaLayer(
                 lambda x: x.reshape(
                     x.size(0),
@@ -127,9 +126,6 @@ class TRJEPA_FT(pl.LightningModule):
         # Make masked target from 2-n and add stacked pos embedding to context for 1
         context, target_mask = self.mask_frames(x)
         x = self.predictor(target_masks=target_mask, context_encoding=context)
-        # remake tensor for reconstruction
-        # take 1 from context and concat 2-n target
-        # x = self.remake_predicted_tensor(context=context, target=x)
         #########################
 
         # NOTE: If finetune_VJEPA is given then use mlp head from that else use our mlp head

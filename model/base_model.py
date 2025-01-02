@@ -24,6 +24,7 @@ class JEPA_base(VisionTransformer):
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
+        self.to(self.model_device)
         self.num_target_blocks = num_target_blocks
         self.mode = mode.lower()
 
@@ -32,11 +33,11 @@ class JEPA_base(VisionTransformer):
 
         self.post_enc_norm_jepa = (
             nn.LayerNorm(self.embed_dim) if self.post_enc_norm else nn.Identity()
-        )
+        ).to(device=self.model_device)
 
-        self.teacher_encoder = copy.deepcopy(
-            self.encoder
-        ).cuda()  # copy student encoder
+        self.teacher_encoder = copy.deepcopy(self.encoder).to(
+            device=self.model_device
+        )  # copy student encoder
 
         # TODO: To help prevent colapse and prioritise expressive representations
         # in the encoder, the decoder should be underpowered with respect to the encoder.
@@ -172,7 +173,7 @@ class JEPA_base(VisionTransformer):
                 self.patch_embed.patch_shape[0],
                 (self.patch_embed.patch_shape[1] * self.patch_embed.patch_shape[2]),
                 1,
-            )
+            ).to(device=self.model_device)
 
             # The target tokens (initialised as `target_masks`) must contain positional information.
             # The `context_encoding` already contains positional encoding from `self.forward_vit()` pass,
@@ -324,7 +325,7 @@ class JEPA_base(VisionTransformer):
                 x=x_stacked if static_scene_temporal_reasoning else x,
                 context_patches=context_patches,
             )
-        )
+        ).to(device=self.model_device)
         batch_size, num_context_patches, embed_dim = context_block.shape
 
         context_encoding: torch.Tensor = (

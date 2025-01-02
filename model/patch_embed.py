@@ -129,6 +129,8 @@ class PatchEmbed3D(nn.Module):
         img_size: Tuple[int, int] = ensure_tuple(img_size)
         patch_size: Tuple[int, int] = ensure_tuple(patch_size)
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self.patch_shape: Tuple[int, int, int] = (
             num_frames // tubelet_size,
             img_size[0] // patch_size[0],
@@ -149,7 +151,7 @@ class PatchEmbed3D(nn.Module):
                 patch_size[0],
                 patch_size[1],
             ),  # Same stride as the patch_size as to extract non-overlapping patches
-        )
+        ).to(device=self.device)
 
     def forward(self, x, **kwargs):
         """

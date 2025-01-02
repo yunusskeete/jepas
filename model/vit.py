@@ -27,6 +27,9 @@ class VisionTransformer(nn.Module):
         **kwargs: Any,
     ):
         super().__init__()
+
+        self.model_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self.img_size = ensure_tuple(img_size)
         self.patch_size = ensure_tuple(patch_size)
 
@@ -65,14 +68,14 @@ class VisionTransformer(nn.Module):
                 (self.patch_embed.patch_shape[1] * self.patch_embed.patch_shape[2]),
                 embed_dim,
             )
-        )
+        ).to(device=self.model_device)
         print(f"{self.pos_embedding.shape=}")
         self.stacked_pos_embedding = None
 
         self.post_emb_norm = post_emb_norm
         self.post_emb_norm_vit = (
             nn.LayerNorm(embed_dim) if self.post_emb_norm else nn.Identity()
-        )
+        ).to(device=self.model_device)
 
         self.layer_dropout = layer_dropout
 
@@ -86,6 +89,8 @@ class VisionTransformer(nn.Module):
         self.post_enc_norm = post_enc_norm
         self.post_enc_norm_vit = (
             nn.LayerNorm(embed_dim) if self.post_enc_norm else nn.Identity()
+        ).to(
+            device=self.model_device
         )  # student encoder
 
     def pseudo_3d_pos_embedding(self, patch_shape, random_t: int):
@@ -120,7 +125,7 @@ class VisionTransformer(nn.Module):
             pos_emb_stacked.shape == self.pos_embedding.shape
         ), "Shape of stacked positional embedding not correct"
 
-        self.stacked_pos_embedding = pos_emb_stacked
+        self.stacked_pos_embedding = pos_emb_stacked.to(device=self.model_device)
 
     def forward_vit(
         self,

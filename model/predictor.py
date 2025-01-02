@@ -74,10 +74,12 @@ class Predictor(nn.Module):
         predictor_embed_dim: Optional[int] = None,
     ):
         super().__init__()
+        self.model_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         # Initialize the transformer-based decoder
         self.decoder = Decoder(
             dim=embed_dim, depth=depth, heads=num_heads, layer_dropout=layer_dropout
-        )
+        ).to(device=self.model_device)
 
         self.predictor_embed = (
             nn.Linear(embed_dim, predictor_embed_dim, bias=True)
