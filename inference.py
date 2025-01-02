@@ -16,6 +16,7 @@ FRAMES_PER_CLIP: int = 8
 VIDEO_PATH: str = (
     "E:/ahmad/kinetics-dataset/extrasmall/val/part_0/-_3E3GBXAUc_000010_000020.mp4"
 )
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def render_tensor_as_frames(tensor, folder_name, type):
@@ -127,7 +128,7 @@ transform = make_transforms(
 # Load video and apply transforms
 original_video = load_video_with_decord(
     video_path=VIDEO_PATH, transform=transform, max_frames=FRAMES_PER_CLIP
-)
+).to(device=device)
 print(f"Tensor shape: {original_video.shape}")
 
 render_tensor_as_frames(original_video, folder_name="inference", type="original")
@@ -153,7 +154,12 @@ finetune_vjepa_path: Optional[str] = None
 finetune_vjepa_model: Optional[VJEPA_FT] = None
 
 if finetune_vjepa_path is not None:
-    finetune_vjepa_model = VJEPA_FT.load_from_checkpoint(finetune_vjepa_path)
+    finetune_vjepa_model = VJEPA_FT.load_from_checkpoint(
+        checkpoint_path=finetune_vjepa_path,
+        frame_count=FRAMES_PER_CLIP,
+        decoder_heads=16,
+        decoder_depth=16,
+    )
 
 ##############################
 # Load Finetuned TRJEPA model
@@ -164,15 +170,20 @@ finetune_model = TRJEPA_FT(
     frame_count=FRAMES_PER_CLIP,
 )
 
-finetune_trjepa_path: Optional[str] = None
+finetune_trjepa_path: Optional[str] = (
+    "D:/MDX/Thesis/new-jepa/jepa/lightning_logs/v-jepa/finetune/static/version_1/checkpoints/epoch=4-step=625.ckpt"
+)
 if finetune_trjepa_path is not None:
     finetune_model = TRJEPA_FT.load_from_checkpoint(
-        finetune_trjepa_path,
+        checkpoint_path=finetune_trjepa_path,
         vjepa_model=model,
         finetune_vjepa_model=finetune_vjepa_model,
-        frame_count=dataset.frames_per_clip,
+        frame_count=FRAMES_PER_CLIP,
+        decoder_heads=16,
+        decoder_depth=16,
     )
 
+stacked_img = stacked_img.to(device=device)
 result = finetune_model(x=stacked_img, random_t=0)
 render_tensor_as_frames(tensor=result, folder_name="inference", type="prediction")
 
