@@ -14,7 +14,7 @@ from finetune_TRJEPA import TRJEPA_FT
 
 FRAMES_PER_CLIP: int = 8
 VIDEO_PATH: str = (
-    "E:/ahmad/kinetics-dataset/extrasmall/val/part_0/-_3E3GBXAUc_000010_000020.mp4"
+    "E:/ahmad/kinetics-dataset/extrasmall/val/part_0/0uSu_3yu_44_000012_000022.mp4"
 )
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -70,11 +70,21 @@ def render_tensor_as_frames(tensor, folder_name, type):
         original_pil_image.save(os.path.join(folder_name, f"frame_{i+1}.png"))
 
 
-def load_video_with_decord(video_path, transform, max_frames=None):
+def load_video_with_decord(video_path, transform=None, max_frames=None, frame_step=8):
+    # Initialize VideoReader
     vr = VideoReader(video_path, ctx=cpu(0))
 
-    # Extract frames as a list of numpy arrays
-    frames = [vr[i].asnumpy() for i in range(len(vr))[:max_frames]]
+    # Total number of frames in the video
+    total_frames = len(vr)
+
+    # Determine frame indices to sample
+    if max_frames:
+        indices = np.linspace(0, total_frames - 1, max_frames, dtype=int)
+    else:
+        indices = np.arange(0, total_frames, frame_step, dtype=int)
+
+    # Extract frames using the calculated indices
+    frames = [vr[i].asnumpy() for i in indices]
 
     # Convert the list of numpy arrays to a single numpy array
     frames = np.stack(frames)  # Shape: [frames, height, width, channels]
@@ -84,13 +94,14 @@ def load_video_with_decord(video_path, transform, max_frames=None):
         torch.tensor(frames).permute(0, 3, 1, 2).float() / 255.0
     )  # [frames, channels, height, width]
 
-    # Apply transform to each frame
-    transformed_frames = torch.stack(
-        [transform(frame) for frame in frames]
-    )  # [frames, channels, height, width]
+    # Apply transform to each frame, if provided
+    if transform:
+        frames = torch.stack(
+            [transform(frame) for frame in frames]
+        )  # [frames, channels, height, width]
 
     # Add batch dimension and reorder to [batch_size, channels, frames, height, width]
-    return transformed_frames.unsqueeze(0).permute(0, 2, 1, 3, 4)
+    return frames.unsqueeze(0).permute(0, 2, 1, 3, 4)
 
 
 # Define transforms
