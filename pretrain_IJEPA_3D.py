@@ -19,26 +19,25 @@ if __name__ == "__main__":
     torch.set_float32_matmul_precision("medium")
 
     dataset_path: Path = Path(
-        "/mnt/data/video/kinetics-dataset/k400"
+        "E:/ahmad/kinetics-dataset/k400"
     ).resolve()  # Path to Kinetics dataset
 
     dataset_videos = VideoDataModule(
         dataset_path=dataset_path,
-        # batch_size=12,
-        batch_size=10,
+        batch_size=8,
         frames_per_clip=8,
         frame_step=8,
         pin_memory=True,
         prefetch_factor=4,
-        num_clips=1,  # -1
+        num_clips=1,
         num_workers=4,
     )
 
     model = VJEPA(
         lr=1e-3,
-        embed_dim=1024,
-        enc_depth=24,
-        num_heads=16,
+        embed_dim=768,
+        enc_depth=12,
+        num_heads=12,
         num_frames=dataset_videos.frames_per_clip,
     )
 
@@ -47,8 +46,8 @@ if __name__ == "__main__":
 
     # TensorBoard Logger
     logger = TensorBoardLogger(
-        "lightning_logs",
-        name="v-jepa/pretrain/images",
+        "checkpoints",
+        name="pretrain/images",
     )
 
     # Path to the checkpoint to resume from (use the latest checkpoint if available)
@@ -70,7 +69,7 @@ if __name__ == "__main__":
         accelerator="gpu",
         devices=1,
         precision="32-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
-        max_epochs=6,
+        max_epochs=3,
         gradient_clip_val=0.1,
         callbacks=[
             lr_monitor,
