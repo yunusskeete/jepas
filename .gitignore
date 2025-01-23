@@ -1,0 +1,14 @@
+.vscode/
+data/
+# Ignore all __pycache__ directories
+**/__pycache__/
+lightning_logs/
+log/
+inference/
+checkpoints/
+misc/
+finetune/
+
+
+*.ipynb
+!TJEPA.ipynb
