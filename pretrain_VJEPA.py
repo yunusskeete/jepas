@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (  # ModelCheckpoint,
@@ -7,8 +8,8 @@ from pytorch_lightning.callbacks import (  # ModelCheckpoint,
 )
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from jepa_datasets import ImageDataModule
-from model import IJEPA
+from jepa_datasets import VideoDataModule
+from model import VJEPA
 
 if __name__ == "__main__":
     import torch
@@ -16,16 +17,18 @@ if __name__ == "__main__":
     torch.set_float32_matmul_precision("medium")
 
     dataset_path: Path = Path(
-        "./data/imagenet/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC"
-    ).resolve()  # Path to ImageNet dataset
+        "/mnt/data/video/kinetics-dataset/k400"
+    ).resolve()  # Path to Kinetics dataset
 
-    dataset = ImageDataModule(
+    dataset = VideoDataModule(
         dataset_path=dataset_path,
-        batch_size=128,
+        batch_size=4,
+        frames_per_clip=16,
         pin_memory=True,
+        prefetch_factor=4,
     )
 
-    model = IJEPA(lr=4e-3)
+    model = VJEPA(lr=1e-3, num_frames=dataset.frames_per_clip)
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
     model_summary = ModelSummary(max_depth=2)
@@ -33,7 +36,7 @@ if __name__ == "__main__":
     # TensorBoard Logger
     logger = TensorBoardLogger(
         "lightning_logs",
-        name="i-jepa",
+        name="v-jepa",
     )
 
     trainer = pl.Trainer(
@@ -46,4 +49,10 @@ if __name__ == "__main__":
         logger=logger,
     )
 
-    trainer.fit(model, dataset)
+    # Path to the checkpoint to resume from (use the latest checkpoint if available)
+    checkpoint_path: Optional[str] = (
+        # "lightning_logs/v-jepa/version_22/checkpoints/epoch=3-step=120620.ckpt"
+        None
+    )
+
+    trainer.fit(model, dataset, ckpt_path=checkpoint_path)
