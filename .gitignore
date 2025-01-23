@@ -6,8 +6,21 @@ lightning_logs/
 lightning_logs1/
 lightning_logs2/
 log/
+inference/
+checkpoints/
+misc/
+profiling/v-jepa/pretrain
+finetune/
 
 JEPA.drawio
 .$JEPA.drawio.bkp
 *.ipynb
-!t.ipynb
+# !t.ipynb
+!TJEPA.ipynb
+v.py
+pretrain_IJEPA_3D.py
+pretrain_TRJEPA_inference.py
+pretrain_VJEPA_video.py
+pretrain_VJEPA_static_scene.py
+finetune_IJEPA_3D.py
+profile_finetune_VJEPA.py
