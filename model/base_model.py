@@ -4,8 +4,6 @@ from typing import Any, List, Literal, Optional, Set, Tuple, Union
 import torch
 import torch.nn as nn
 
-from utils.types import Number
-
 from .predictor import Predictor
 from .vit import VisionTransformer
 
@@ -320,8 +318,8 @@ class JEPA_base(VisionTransformer):
     @staticmethod
     def generate_target_patches(
         patch_dim: Union[Tuple[int, int], Tuple[int, int, int]],
-        aspect_ratio: Number,
-        scale: Number,
+        aspect_ratio: float,
+        scale: float,
         num_target_blocks: int,
     ) -> Tuple[List[List[int]], Set[int]]:
         """
@@ -331,8 +329,8 @@ class JEPA_base(VisionTransformer):
 
         Args:
             patch_dim (Union[Tuple[int, int], Tuple[int, int, int]]): The number of patches in each dimension (height, width)/(temporal, height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
-            scale (Number): Scaling factor for the number of patches in the target block.
+            aspect_ratio (float): Aspect ratio to be maintained for target blocks.
+            scale (float): Scaling factor for the number of patches in the target block.
             num_target_blocks (int): Number of target blocks to generate.
 
         Returns:
@@ -345,8 +343,8 @@ class JEPA_base(VisionTransformer):
     @staticmethod
     def generate_context_patches(
         patch_dim: Union[Tuple[int, int], Tuple[int, int, int]],
-        aspect_ratio: Number,
-        scale: Number,
+        aspect_ratio: float,
+        scale: float,
         target_patches_to_exclude: Set[int],
     ) -> List[int]:
         """
@@ -356,8 +354,8 @@ class JEPA_base(VisionTransformer):
 
         Args:
             patch_dim (Union[Tuple[int, int], Tuple[int, int, int]]): Dimensions of the patches (height, width)/(temporal, height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
-            scale (Number): Scaling factor for the number of patches in the context block.
+            aspect_ratio (float): Aspect ratio to be maintained for the context block.
+            scale (float): Scaling factor for the number of patches in the context block.
             target_patches_to_exclude (Set[int]): Set containing indices of target patches.
 
         Returns:
