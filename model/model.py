@@ -9,8 +9,6 @@ from transformers import BertTokenizer
 from x_transformers import Encoder
 from x_transformers.x_transformers import ScaledSinusoidalEmbedding
 
-from utils.types import Number
-
 from .base_model import JEPA_base
 from .predictor import Predictor
 
@@ -28,7 +26,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         weight_decay: float = 0.05,
         target_aspect_ratio: Tuple[float, float] = (0.75, 1.5),
         target_scale_interval: Tuple[float, float] = (0.15, 0.2),
-        context_aspect_ratio: Number = 1,
+        context_aspect_ratio: int = 1.0,
         context_scale: Tuple[float, float] = (0.85, 1.0),
         num_target_blocks: int = 4,  # number of distinct target blocks per image
         m: float = 0.996,  # momentum
@@ -125,8 +123,8 @@ class IJEPA(JEPA_base, pl.LightningModule):
     @staticmethod
     def generate_target_patches(
         patch_dim: Tuple[int, int],
-        aspect_ratio: Number,
-        scale: Number,
+        aspect_ratio: float,
+        scale: float,
         num_target_blocks: int,
         seed: Optional[int] = None,
     ) -> Tuple[List[List[int]], Set[int]]:
@@ -135,8 +133,8 @@ class IJEPA(JEPA_base, pl.LightningModule):
 
         Args:
             patch_dim (Tuple[int, int]): The number of patches in each dimension (height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
-            scale (Number): Scaling factor for the number of patches in the target block.
+            aspect_ratio (float): Aspect ratio to be maintained for target blocks.
+            scale (float): Scaling factor for the number of patches in the target block.
             num_target_blocks (int): Number of target blocks to generate.
             seed (Optional[int]): An optional random seed for reproducibility.
 
@@ -220,8 +218,8 @@ class IJEPA(JEPA_base, pl.LightningModule):
     @staticmethod
     def generate_context_patches(
         patch_dim: Tuple[int, int],
-        aspect_ratio: Number,
-        scale: Number,
+        aspect_ratio: float,
+        scale: float,
         target_patches_to_exclude: Set[int],
         seed: Optional[int] = None,
     ) -> List[int]:
@@ -230,8 +228,8 @@ class IJEPA(JEPA_base, pl.LightningModule):
 
         Args:
             patch_dim (Tuple[int, int]): The number of patches in each dimension (height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
-            scale (Number): Scaling factor for the number of patches in the context block.
+            aspect_ratio (float): Aspect ratio to be maintained for the context block.
+            scale (float): Scaling factor for the number of patches in the context block.
             target_patches_to_exclude (Set[int]): Set containing indices of target patches.
             seed (Optional[int]): An optional random seed for reproducibility.
 
@@ -302,7 +300,7 @@ class IJEPA(JEPA_base, pl.LightningModule):
         x: torch.Tensor,
         target_aspect_ratio: float,
         target_scale: float,
-        context_aspect_ratio: Number,
+        context_aspect_ratio: float,
         context_scale: float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         target_patches: List[List[int]]
@@ -532,7 +530,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         weight_decay: float = 0.05,
         target_aspect_ratio: Tuple[float, float] = (0.75, 1.5),
         target_scale_interval: Tuple[float, float] = (0.15, 0.2),
-        context_aspect_ratio: Number = 1,
+        context_aspect_ratio: float = 1.0,
         context_scale: Tuple[float, float] = (0.85, 1.0),
         num_target_blocks: int = 4,  # number of distinct target blocks per image
         m: float = 0.996,  # momentum
@@ -633,8 +631,8 @@ class VJEPA(JEPA_base, pl.LightningModule):
     @staticmethod
     def generate_target_patches(
         patch_dim: Tuple[int, int, int],
-        aspect_ratio: Number,
-        scale: Number,
+        aspect_ratio: float,
+        scale: float,
         num_target_blocks: int,
         seed: Optional[int] = None,
     ) -> Tuple[List[List[int]], Set[int]]:
@@ -643,8 +641,8 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
         Args:
             patch_dim (Tuple[int, int, int]): The number of patches in each dimension (temporal, height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for target blocks.
-            scale (Number): Scaling factor for the number of patches in the target block.
+            aspect_ratio (float): Aspect ratio to be maintained for target blocks.
+            scale (float): Scaling factor for the number of patches in the target block.
             num_target_blocks (int): Number of target blocks to generate.
             seed (Optional[int]): An optional random seed for reproducibility.
 
@@ -742,8 +740,8 @@ class VJEPA(JEPA_base, pl.LightningModule):
     @staticmethod
     def generate_context_patches(
         patch_dim: Tuple[int, int, int],
-        aspect_ratio: Number,
-        scale: Number,
+        aspect_ratio: float,
+        scale: float,
         target_patches_to_exclude: Set[int],
         seed: Optional[int] = None,
     ) -> List[int]:
@@ -752,8 +750,8 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
         Args:
             patch_dim (Tuple[int, int, int]): Dimensions of the patches (temporal, height, width).
-            aspect_ratio (Number): Aspect ratio to be maintained for the context block.
-            scale (Number): Scaling factor for the number of patches in the context block.
+            aspect_ratio (float): Aspect ratio to be maintained for the context block.
+            scale (float): Scaling factor for the number of patches in the context block.
             target_patches_to_exclude (Set[int]): Set containing indices of target patches.
             seed (Optional[int]): An optional random seed for reproducibility.
 
@@ -838,7 +836,7 @@ class VJEPA(JEPA_base, pl.LightningModule):
         x: torch.Tensor,
         target_aspect_ratio: float,
         target_scale: float,
-        context_aspect_ratio: Number,
+        context_aspect_ratio: float,
         context_scale: float,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         target_patches: List[List[int]]
