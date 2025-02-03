@@ -35,17 +35,17 @@ Run a pretraining job with the [imagenet](https://www.image-net.org/) dataset (s
 python pretrain_IJEPA.py
 ```
 
-# TODO
 Run a finetuning job...
 ```bash
 python finetune_IJEPA.py
 ```
 
 ## TODO:
-- [ ] Linear probing setup
+- [ ] TBD
 
 ## Acknowledgements
 - The above implementations use [@lucidrains](https://github.com/lucidrains) x-transfromers (https://github.com/lucidrains/x-transformers)
+- This repo builds upon the I-JEPA implementation by [gaasher](https://github.com/gaasher/I-JEPA)
 
 ## Citation:
 ```
