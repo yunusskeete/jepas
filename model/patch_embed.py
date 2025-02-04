@@ -1,10 +1,14 @@
-from typing import Tuple
+from typing import Tuple, TypeVar, Union
 
 import torch
 import torch.nn as nn
 from einops import rearrange
 
-from utils.types import ensure_tuple
+T = TypeVar("T")  # Generic type variable
+
+
+def ensure_tuple(value: Union[T, Tuple[T, T]]) -> Tuple[T, T]:
+    return value if isinstance(value, tuple) else (value, value)
 
 
 class TokenEmbed1D(nn.Module):
