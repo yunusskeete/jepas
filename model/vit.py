@@ -1,4 +1,4 @@
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Optional, Tuple, TypeVar, Union
 
 import torch
 import torch.nn as nn
@@ -7,6 +7,12 @@ from x_transformers import Encoder
 from utils.types import ensure_tuple
 
 from .patch_embed import PatchEmbed2D, PatchEmbed3D
+
+T = TypeVar("T")  # Generic type variable
+
+
+def ensure_tuple(value: Union[T, Tuple[T, T]]) -> Tuple[T, T]:
+    return value if isinstance(value, tuple) else (value, value)
 
 
 class VisionTransformer(nn.Module):
