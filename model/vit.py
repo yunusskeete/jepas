@@ -4,8 +4,6 @@ import torch
 import torch.nn as nn
 from x_transformers import Encoder
 
-from utils.types import ensure_tuple
-
 from .patch_embed import PatchEmbed2D, PatchEmbed3D
 
 T = TypeVar("T")  # Generic type variable
