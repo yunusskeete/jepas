@@ -2,47 +2,37 @@
 Un-official PyTorch implementations of:
 - [x] I-JEPA: [Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture](https://arxiv.org/abs/2301.08243)
 - [x] V-JEPA: [Revisiting Feature Prediction for Learning Visual Representations from Video](https://arxiv.org/abs/2404.08471)
+- [*] T-JEPA: Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture (Original Works)
+- [*] A-JEPA: Self-Supervised Learning from Audio with a Joint-Embedding Predictive Architecture (Original Works)
 - [ ] MC-JEPA: [MC-JEPA: A Joint-Embedding Predictive Architecture for Self-Supervised Learning of Motion and Content Features](https://arxiv.org/abs/2307.12698)
 - [ ] Graph-JEPA: [Graph-level Representation Learning with Joint-Embedding Predictive Architectures](https://arxiv.org/abs/2309.16014)
 
-## I-JEPA Explained
-(JEPA is just an architectural and optimisational "slight of hand" for pretraining Vision Transformers that enables them to learn expressive features by predicting the latent space representations of uncorrupted portions of images given image inputs subject to occlusions.)
+## JEPAs Explained
+Joint-Embedding Predictive Architectures (JEPAs) utilise latent space representations to learn rich semantic understandings of inputs.
+This is achieved via a method called **self-distillation** - in which a model's latent space representations form its own prediction targets, thus supervising its own learning.
+Many self-supervised techniques learn from the *structure implicit in data signals,* rather than relying on labels for supervision.
+The JEPA paradigm takes this one step further - it incentivises the learning of progressively more expressive models (interpretations and dynamics) of input data signals by tasking itself with *learning from the structure of its internal model of those input data signals:*
+  After interpreting a signal, the model tests itself by predicting *its own interpretation of the input signal* - thus it learns to structure its percepts, and learns to the structure of its internal model of the structured external world - developing a progressively more sophisticated "world model".
 
-I-JEPA exploits the following truth:
-The latent space representations is all you need for understanding.
-
-Picture your mother - one of the faces you are most familiar with.
-How detailed is that picture, however?
-Not very - because it doesn't need to be.
-
-You likely have learned highly expressive latent representations for things you understand best/are most familiar with.
-You do not need to be able to perform high resolution reconstruction (ViT MAE), however, to achieve expert understansing.
-You just need a good latent representation.
-
-How do we train a good latent representation?
-Train a model to predict how it would represent patches of an image *if it could see them*.
-In a self-supervised manner, we can encode patches with a target encoder (teacher), that are masked to a context encoder (student), and task the context encoder with predicting the encoding produced by the target encoder.
-By constructing an appropriate loss function, we can train the student encoder to match the teacher encoder, as the teacher encoder learns better representations.
-The only way for the student encoder to predict the teacher encoder's patches is to learn robust representations in a vision "world model".
-
-Basic Schematic of Architecture:  
-![screenshot](IJEPA.png)
+## Image-JEPA Schematic:
+![](IJEPA.png)
 
 ## Usage:
-### I-JEPA
-Run a pretraining job with the [imagenet](https://www.image-net.org/) dataset (stored locally at [relative/path/to/splits](data/imagenet/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC)):
+### Configs
+The scripts in this repo are heavily dependent on JSON configurations.
+These must be set up before execution.
+
+### E.g. I-JEPA Pretraining
+After setting up the config and dataset, running a pretraining job cam be executed with the following command:
 ```bash
 python pretrain_IJEPA.py
 ```
 
-# TODO
-Run a finetuning job...
-```bash
-python finetune_IJEPA.py
-```
-
-## TODO:
-- [ ] Linear probing setup
+### E.g. I-JEPA Finetuning
+I-JEPA can be utilised as a pretrained image backbone and finetuned for downstream tasks.
+Task-specific model adaptations must first be implemented, and a finetune script created.
+Much of the pretraining scripts in this repo can then serve as boilerplate for downstream finetuning.
+For inspiration, see [gaasher](https://github.com/gaasher)'s [`finetune_IJEPA.py`](https://github.com/gaasher/I-JEPA/blob/main/finetune_IJEPA.py).
 
 ## Acknowledgements
 - The above implementations use [@lucidrains](https://github.com/lucidrains) x-transfromers (https://github.com/lucidrains/x-transformers)
