@@ -6,7 +6,7 @@ import torch.nn as nn
 
 from utils.types import Number
 
-from .predictor import Predictor
+from ..predictor import Predictor
 from .vit import VisionTransformer
 
 # pylint: disable=pointless-string-statement

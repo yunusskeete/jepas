@@ -1,58 +1,88 @@
-from pathlib import Path
-from typing import Optional
-
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import (  # ModelCheckpoint,
-    LearningRateMonitor,
-    ModelSummary,
-)
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from jepa_datasets import VideoDataModule
+from configs import video_config
+from configs import video_experiment_config as experiment_config
+from configs import video_runtime_config as runtime_config
+from configs import video_tracking_config as tracking_config
+from jepa_datasets import VideoDataModule, create_video_datamodule
 from model import VJEPA
+from model.video import vjepa_model_builders
+
+# EXPERIMENT
+MODEL_NAME: str = experiment_config["MODEL_NAME"]
+MODEL_SIZE: str = experiment_config["MODEL_SIZE"]
+LR: float = experiment_config["LR"]
+SEED: int = experiment_config["SEED"]
+MAX_EPOCHS: int = experiment_config["MAX_EPOCHS"]
+GRADIENT_CLIP_VAL: float = experiment_config["GRADIENT_CLIP_VAL"]
+
+# TRACKING
+LOG_DIR: str = tracking_config["LOG_DIR"]
+LOGGING_INTERVAL: str = tracking_config["LOGGING_INTERVAL"]
+TOK_K_CHECKPOINTS: int = tracking_config["TOK_K_CHECKPOINTS"]
+CHECKPOINT_DIR: str = tracking_config["CHECKPOINT_DIR"]
+CHECKPOINT_MONITOR: str = tracking_config["CHECKPOINT_MONITOR"]
+CHECKPOINT_MODE: str = tracking_config["CHECKPOINT_MODE"]
+VAL_CHECK_INTERVAL: float = tracking_config["VAL_CHECK_INTERVAL"]
+
+# RUNTIME
+ACCELERATOR: str = runtime_config["ACCELERATOR"]
+DEVICES: int = runtime_config["DEVICES"]
+PRECISION: int = runtime_config["PRECISION"]
 
 if __name__ == "__main__":
+    import gc
+
     import torch
 
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision(runtime_config["FLOAT32_MATMUL_PRECISION"])
 
-    dataset_path: Path = Path(
-        "/mnt/data/video/kinetics-dataset/k400"
-    ).resolve()  # Path to Kinetics dataset
-
-    dataset = VideoDataModule(
-        dataset_path=dataset_path,
-        batch_size=4,
-        frames_per_clip=16,
-        pin_memory=True,
-        prefetch_factor=4,
+    # 1. Instantiate model with fixed initialisation
+    model_id = f"{MODEL_SIZE}_{SEED}_{LR:.1e}-{MAX_EPOCHS}"
+    model: VJEPA = vjepa_model_builders[MODEL_SIZE](
+        video_config=video_config,
+        seed=SEED,
     )
+    print(f"✅ Model loaded: {model_id}")
 
-    model = VJEPA(lr=1e-3, num_frames=dataset.frames_per_clip)
+    # 2. Load dataset
+    datamodule: VideoDataModule = create_video_datamodule(video_config=video_config)
+    print("✅ Dataset loaded")
 
-    lr_monitor = LearningRateMonitor(logging_interval="step")
-    model_summary = ModelSummary(max_depth=2)
-
-    # TensorBoard Logger
-    logger = TensorBoardLogger(
-        "lightning_logs",
-        name="v-jepa",
+    # 3. Callbacks
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=CHECKPOINT_DIR,
+        filename=MODEL_NAME,
+        monitor=CHECKPOINT_MONITOR,
+        mode=CHECKPOINT_MODE,
+        save_top_k=TOK_K_CHECKPOINTS,
     )
+    lr_monitor = LearningRateMonitor(logging_interval=LOGGING_INTERVAL)
+
+    # 4. Train
+    logger = TensorBoardLogger(save_dir=LOG_DIR, name=MODEL_NAME, version=model_id)
 
     trainer = pl.Trainer(
-        accelerator="gpu",
-        devices=1,
-        precision="32-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
-        max_epochs=15,
-        gradient_clip_val=0.1,
-        callbacks=[lr_monitor, model_summary],
+        max_epochs=MAX_EPOCHS,
+        accelerator=ACCELERATOR,
+        devices=DEVICES,
+        precision=PRECISION,  # '32-true', 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
+        gradient_clip_val=GRADIENT_CLIP_VAL,
+        callbacks=[checkpoint_callback, lr_monitor],
+        val_check_interval=VAL_CHECK_INTERVAL,
         logger=logger,
     )
 
-    # Path to the checkpoint to resume from (use the latest checkpoint if available)
-    checkpoint_path: Optional[str] = (
-        # "lightning_logs/v-jepa/version_22/checkpoints/epoch=3-step=120620.ckpt"
-        None
-    )
+    trainer.fit(model, datamodule=datamodule)
 
-    trainer.fit(model, dataset, ckpt_path=checkpoint_path)
+    # 5. Save model
+    trainer.save_checkpoint(f"checkpoints/{MODEL_NAME}_{model_id}.ckpt")
+
+    # 6. Test
+    trainer.test(model, datamodule=datamodule)
+
+    # 7. Cleanup
+    del datamodule
+    gc.collect()

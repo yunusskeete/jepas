@@ -837,6 +837,7 @@ class RandomResize(object):
         elif isinstance(clip[0], PIL.Image.Image):
             im_w, im_h = clip[0].size
 
+        # pylint: disable=possibly-used-before-assignment
         new_w = int(im_w * scaling_factor)
         new_h = int(im_h * scaling_factor)
         new_size = (new_w, new_h)

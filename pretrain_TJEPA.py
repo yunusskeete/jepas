@@ -1,65 +1,98 @@
-from typing import Optional
-
-import datasets
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import (  # ModelCheckpoint,
-    LearningRateMonitor,
-    ModelSummary,
-)
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
-from transformers import BertTokenizer
 
-from jepa_datasets import TextDataModule
-from model import TJEPA
+from configs import text_config
+from configs import text_dataset_config as dataset_config
+from configs import text_experiment_config as experiment_config
+from configs import text_runtime_config as runtime_config
+from configs import text_tracking_config as tracking_config
+from jepa_datasets import (
+    TextDataModule,
+    create_text_datamodule,
+    dynamic_padding_collate,
+)
+from model.text import tjepa_model_builders
+
+# EXPERIMENT
+MODEL_NAME: str = experiment_config["MODEL_NAME"]
+MODEL_SIZE: str = experiment_config["MODEL_SIZE"]
+LR: float = experiment_config["LR"]
+SEED: int = experiment_config["SEED"]
+MAX_EPOCHS: int = experiment_config["MAX_EPOCHS"]
+GRADIENT_CLIP_VAL: float = experiment_config["GRADIENT_CLIP_VAL"]
+USE_ENCODER: bool = experiment_config["USE_ENCODER"]
+
+# TRACKING
+LOG_DIR: str = tracking_config["LOG_DIR"]
+LOGGING_INTERVAL: str = tracking_config["LOGGING_INTERVAL"]
+TOK_K_CHECKPOINTS: int = tracking_config["TOK_K_CHECKPOINTS"]
+CHECKPOINT_DIR: str = tracking_config["CHECKPOINT_DIR"]
+CHECKPOINT_MONITOR: str = tracking_config["CHECKPOINT_MONITOR"]
+CHECKPOINT_MODE: str = tracking_config["CHECKPOINT_MODE"]
+VAL_CHECK_INTERVAL: float = tracking_config["VAL_CHECK_INTERVAL"]
+
+# RUNTIME
+ACCELERATOR: str = runtime_config["ACCELERATOR"]
+DEVICES: int = runtime_config["DEVICES"]
+PRECISION: int = runtime_config["PRECISION"]
+
+# DATASET
+DATASET_TRAIN_FRACTION: float = dataset_config["DATASET_TRAIN_FRACTION"]
 
 if __name__ == "__main__":
+    import gc
+
     import torch
-    from datasets import load_dataset
 
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision(runtime_config["FLOAT32_MATMUL_PRECISION"])
 
-    hf_dataset_name: str = "Skylion007/openwebtext"
-    hf_dataset: datasets.arrow_dataset.Dataset = load_dataset(
-        hf_dataset_name, split="train"
+    # 1. Instantiate model with fixed initialisation
+    model_id = f"{MODEL_SIZE}_{SEED}_{LR:.1e}-{MAX_EPOCHS}_{DATASET_TRAIN_FRACTION}-{'enc' if USE_ENCODER else 'emb'}"
+    model, _, _ = tjepa_model_builders[MODEL_SIZE](
+        text_config=text_config,
+        seed=SEED,
     )
+    print(f"✅ Model loaded: {model_id}")
 
-    tokeniser = BertTokenizer.from_pretrained("bert-base-uncased")
-
-    dataset = TextDataModule(
-        hf_dataset=hf_dataset,
-        tokeniser=tokeniser,
-        max_length=128,
-        pin_memory=True,
-        prefetch_factor=4,
-        # batch_size=24,
+    # 2. Load dataset
+    datamodule: TextDataModule = create_text_datamodule(
+        text_config=text_config, collate_fn=dynamic_padding_collate
     )
+    print("✅ Dataset loaded")
 
-    model = TJEPA(
-        lr=1e-3,
-        # embed_dim=32,
+    # 3. Callbacks
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=CHECKPOINT_DIR,
+        filename=MODEL_NAME,
+        monitor=CHECKPOINT_MONITOR,
+        mode=CHECKPOINT_MODE,
+        save_top_k=TOK_K_CHECKPOINTS,
     )
+    lr_monitor = LearningRateMonitor(logging_interval=LOGGING_INTERVAL)
 
-    lr_monitor = LearningRateMonitor(logging_interval="step")
-    model_summary = ModelSummary(max_depth=2)
+    # 4. Train
+    logger = TensorBoardLogger(save_dir=LOG_DIR, name=MODEL_NAME, version=model_id)
 
-    # TensorBoard Logger
-    logger = TensorBoardLogger(
-        "lightning_logs",
-        name="t-jepa",
-    )
-
-    trainer = pl.Trainer(
-        accelerator="gpu",
-        devices=1,
-        precision="32-true",  # 'transformer-engine', 'transformer-engine-float16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true', 64, 32, 16, '64', '32', '16', 'bf16'
-        max_epochs=15,
-        gradient_clip_val=0.1,
-        callbacks=[lr_monitor, model_summary],
+    trainer = Trainer(
+        max_epochs=MAX_EPOCHS,
+        accelerator=ACCELERATOR,
+        devices=DEVICES,
+        precision=PRECISION,
+        gradient_clip_val=GRADIENT_CLIP_VAL,
+        callbacks=[checkpoint_callback, lr_monitor],
+        val_check_interval=VAL_CHECK_INTERVAL,
         logger=logger,
-        val_check_interval=0.1,  # Run validation every 25% of an epoch
     )
 
-    # Path to the checkpoint to resume from (use the latest checkpoint if available)
-    checkpoint_path: Optional[str] = None
+    trainer.fit(model, datamodule=datamodule)
 
-    trainer.fit(model, dataset, ckpt_path=checkpoint_path)
+    # 5. Save
+    trainer.save_checkpoint(f"checkpoints/{MODEL_NAME}_{model_id}.ckpt")
+
+    # 6. Test
+    trainer.test(model, datamodule=datamodule)
+
+    # 7. Cleanup
+    del datamodule
+    gc.collect()
