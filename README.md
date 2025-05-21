@@ -35,7 +35,7 @@ Much of the pretraining scripts in this repo can then serve as boilerplate for d
 For inspiration, see [gaasher](https://github.com/gaasher)'s [`finetune_IJEPA.py`](https://github.com/gaasher/I-JEPA/blob/main/finetune_IJEPA.py).
 
 ## Acknowledgements
-- The above implementations use [@lucidrains](https://github.com/lucidrains) x-transfromers (https://github.com/lucidrains/x-transformers)
+- The implementations in this repo were inspired by [gaasher](https://github.com/gaasher/I-JEPA/tree), and utilise [@lucidrains](https://github.com/lucidrains) x-transfromers (https://github.com/lucidrains/x-transformers).
 
 ## Citation:
 ```
