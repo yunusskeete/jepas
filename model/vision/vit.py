@@ -6,7 +6,7 @@ from x_transformers import Encoder
 
 from utils.types import ensure_tuple
 
-from .patch_embed import PatchEmbed2D, PatchEmbed3D
+from ..patch_embed import PatchEmbed2D, PatchEmbed3D
 
 
 class VisionTransformer(nn.Module):
@@ -22,7 +22,7 @@ class VisionTransformer(nn.Module):
         num_heads: int = 8,
         post_emb_norm: bool = True,
         post_enc_norm: bool = True,
-        layer_dropout: float = 0.0,
+        layer_dropout: float = 0.1,
         **kwargs: Any,
     ):
         super().__init__()
@@ -125,7 +125,7 @@ def vit_tiny(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         in_chans=in_chans,
         num_frames=num_frames,
         embed_dim=192,
-        enc_depth=18,
+        enc_depth=12,
         num_heads=8,
         **kwargs,
     )
@@ -138,7 +138,7 @@ def vit_small(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         in_chans=in_chans,
         num_frames=num_frames,
         embed_dim=384,
-        enc_depth=12,
+        enc_depth=18,
         num_heads=8,
         **kwargs,
     )
@@ -151,7 +151,7 @@ def vit_base(img_size, patch_size=16, in_chans=3, num_frames=1, **kwargs):
         in_chans=in_chans,
         num_frames=num_frames,
         embed_dim=768,
-        enc_depth=12,
+        enc_depth=18,
         num_heads=12,
         **kwargs,
     )

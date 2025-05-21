@@ -1,0 +1,223 @@
+{
+    "image": {
+        "model": {
+            "IMAGE_SIZE": 224,
+            "PATCH_SIZE": 16,
+            "NUM_FRAMES": 1,
+            "IN_CHANS": 3,
+            "POST_EMBED_NORM": true,
+            "POST_ENCODE_NORM": true,
+            "LAYER_DROPOUT": 0.1
+        },
+        "dataset": {
+            "DATASET_PATH": "./data/imagenet/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC",
+            "ACCEPTABLE_FILE_EXTENSIONS": [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"],
+            "SHUFFLE_DATASET": true,
+            "transforms": {
+                "RANDOM_RESIZE_CROP": 224,
+                "RANDON_HFLIP": true,
+                "TO_TENSOR": true,
+                "NORMALIZE": {
+                    "MEAN": [0.485, 0.456, 0.406],
+                    "STD": [0.229, 0.224, 0.225]
+                }
+            }
+        },
+        "profiling": {
+            "LOG_DIR": "./profiler_logs",
+            "PROFILING_STEPS": 50,
+            "BATCH_SIZE_OPTIONS": [16, 32, 64, 128, 256, 512],
+            "NUM_WORKERS_OPTIONS": [4, 8, 12, 16, 24, 32],
+            "PIN_MEMORY_OPTIONS": [true, false],
+            "PERSISTENT_WORKERS_OPTIONS": [true, false],
+            "PREFETCH_FACTOR_OPTIONS": [1, 2, 4, 8, 16]
+        },
+        "experiment": {
+            "MODEL_NAME": "i-jepa",
+            "LR": 4e-3,
+            "BATCH_SIZE": 128,
+            "NUM_WORKERS": 16,
+            "PIN_MEMORY": true,
+            "PERSISTENT_WORKERS": true,
+            "PREFETCH_FACTOR": 2,
+            "SEED": 42,
+            "MAX_EPOCHS": 3,
+            "GRADIENT_CLIP_VAL": 0.1,
+            "WEIGHT_DECAY": 0.05,
+            "TARGET_ASPECT_RATIO": [0.75, 1.5],
+            "TARGET_SCALE_INTERVAL": [0.15, 0.2],
+            "CONTEXT_ASPECT_RATIO": 1,
+            "CONTEXT_SCALE": [0.85, 1.0],
+            "NUM_TARGET_BLOCKS": 4,
+            "M": 0.996,
+            "MOMENTUM_LIMITS": [0.996, 1.0]
+        },
+        "runtime": {
+            "ACCELERATOR": "gpu",
+            "DEVICES": 1,
+            "PRECISION": "32-true",
+            "FLOAT32_MATMUL_PRECISION": "medium"
+        },
+        "tracking": {
+            "LOG_DIR": "lightning_logs",
+            "LOGGING_INTERVAL": "step",
+            "TOK_K_CHECKPOINTS": 1,
+            "CHECKPOINT_DIR": "./checkpoints",
+            "CHECKPOINT_MONITOR": "val_loss",
+            "CHECKPOINT_MODE": "min",
+            "MODEL_SUMMARY_MAX_DEPTH": 2,
+            "VAL_CHECK_INTERVAL": 0.25
+        }
+    },
+    "video": {
+        "model": {
+            "IMAGE_SIZE": 224,
+            "PATCH_SIZE": 16,
+            "NUM_FRAMES": 1,
+            "TUBELET_SIZE": 4,
+            "IN_CHANS": 3,
+            "POST_EMBED_NORM": true,
+            "POST_ENCODE_NORM": true,
+            "LAYER_DROPOUT": 0.1
+        },
+        "dataset": {
+            "DATASET_PATH": "./data/video/kinetics-dataset/k400",
+            "ACCEPTABLE_FILE_EXTENSIONS": [".mp4", ".avi", ".mpeg", ".mov", ".mkv"],
+            "SHUFFLE_DATASET": false,
+            "FILTER_SHORT_VIDEOS": false,
+            "MAX_VIDEO_SIZE_B": 10000000000,
+            "MAX_VIDEO_DURATION": null,
+            "transforms": {
+                "RANDOM_HORIZONTAL_FLIP": true,
+                "RANDOM_RESIZE_ASPECT_RATION": ["3/4", "4/3"],
+                "RANDOM_RESIZE_SCALE": [0.4, 1.0],
+                "REPROB": 0.0,
+                "auto_augment": false,
+                "motion_shift": false,
+                "CROP_SIZE": 224
+            }
+        },
+        "profiling": {
+            "LOG_DIR": "./profiler_logs",
+            "PROFILING_STEPS": 50,
+            "BATCH_SIZE_OPTIONS": [16, 32, 64, 128, 256, 512],
+            "NUM_WORKERS_OPTIONS": [4, 8, 12, 16, 24, 32],
+            "PIN_MEMORY_OPTIONS": [true, false],
+            "PERSISTENT_WORKERS_OPTIONS": [true, false],
+            "PREFETCH_FACTOR_OPTIONS": [1, 2, 4, 8, 16]
+        },
+        "experiment": {
+            "MODEL_NAME": "i-jepa",
+            "LR": 4e-3,
+            "BATCH_SIZE": 128,
+            "FRAMES_PER_CLIP": 16,
+            "FRAME_STEP": 4,
+            "NUM_CLIPS": 1,
+            "NUM_WORKERS": 16,
+            "PIN_MEMORY": true,
+            "PERSISTENT_WORKERS": true,
+            "PREFETCH_FACTOR": 2,
+            "SEED": 42,
+            "MAX_EPOCHS": 3,
+            "GRADIENT_CLIP_VAL": 0.1,
+            "WEIGHT_DECAY": 0.05,
+            "TARGET_ASPECT_RATIO": [0.75, 1.5],
+            "TARGET_SCALE_INTERVAL": [0.15, 0.2],
+            "CONTEXT_ASPECT_RATIO": 1,
+            "CONTEXT_SCALE": [0.85, 1.0],
+            "NUM_TARGET_BLOCKS": 4,
+            "M": 0.996,
+            "MOMENTUM_LIMITS": [0.996, 1.0]
+        },
+        "runtime": {
+            "ACCELERATOR": "gpu",
+            "DEVICES": 1,
+            "PRECISION": "32-true",
+            "FLOAT32_MATMUL_PRECISION": "medium"
+        },
+        "tracking": {
+            "LOG_DIR": "lightning_logs",
+            "LOGGING_INTERVAL": "step",
+            "TOK_K_CHECKPOINTS": 1,
+            "CHECKPOINT_DIR": "./checkpoints",
+            "CHECKPOINT_MONITOR": "val_loss",
+            "CHECKPOINT_MODE": "min",
+            "MODEL_SUMMARY_MAX_DEPTH": 2,
+            "VAL_CHECK_INTERVAL": 0.25
+        }
+    },
+    "text": {
+        "model": {
+            "BERT_MODEL_NAME": "bert-base-uncased",
+            "USE_PRETRAINED_TEXT_EMBEDDINGS": true,
+            "USE_PRETRAINED_TEXT_ENCODER": true,
+            "TARGET_ASPECT_RATIO": [0.75, 1.5],
+            "TARGET_SCALE_INTERVAL": [0.15, 0.2],
+            "CONTEXT_ASPECT_RATIO": 1,
+            "CONTEXT_SCALE": [0.85, 1.0],
+            "M": 0.996,
+            "MOMENTUM_LIMITS": [0.996, 1.0],
+            "MAX_LENGTH": 128,
+            "LAYER_DROPOUT": 0.1
+        },
+        "dataset": {
+            "UNTOKENIZED_DATASET_NAME": "bookcorpus",
+            "UNTOKENIZED_DATASET_SPLIT": "train",
+            "TOKENIZED_DATASET_NAME": "/home/yunusskeete/Documents/data/text/tokenized_bookcorpus",
+            "TOKENIZER_MODEL_NAME": "bert-base-uncased",
+            "SHUFFLE_DATASET": true,
+            "TEST_SPLIT": 0.02,
+            "DATASET_TRAIN_FRACTION": 0.4,
+            "USE_PRE_TOKENIZED_DATASET": true,
+            "PAD_TOKEN_ID": 0,
+            "tokenization" : {
+                "BATCHED": true,
+                "NUM_PROC": 32,
+                "MAX_LENGTH": 128,
+                "TRUNCATION": true,
+                "PADDING": false
+            }
+        },
+        "profiling": {
+            "LOG_DIR": "./profiler_logs",
+            "PROFILING_STEPS": 50,
+            "BATCH_SIZE_OPTIONS": [16, 32, 64, 128, 256, 512],
+            "NUM_WORKERS_OPTIONS": [4, 8, 12, 16, 24, 32],
+            "PIN_MEMORY_OPTIONS": [true, false],
+            "PERSISTENT_WORKERS_OPTIONS": [true, false],
+            "PREFETCH_FACTOR_OPTIONS": [1, 2, 4, 8, 16]
+        },
+        "experiment": {
+            "MODEL_NAME": "t-jepa",
+            "MODEL_SIZE": "tiny",
+            "LR": 1e-4,
+            "WEIGHT_DECAY": 0.01,
+            "LR_WARMUP_FRACTION": 0.01,
+            "SEED": 42,
+            "MAX_EPOCHS": 1,
+            "BATCH_SIZE": 96,
+            "NUM_WORKERS": 16,
+            "PIN_MEMORY": true,
+            "PERSISTENT_WORKERS": true,
+            "PREFETCH_FACTOR": 2,
+            "FREEZE_EMBEDDER": true,
+            "USE_ENCODER": true
+        },
+        "runtime": {
+            "ACCELERATOR": "gpu",
+            "DEVICES": 1,
+            "PRECISION": "32-true",
+            "FLOAT32_MATMUL_PRECISION": "medium"
+        },
+        "tracking": {
+            "LOG_DIR": "lightning_logs",
+            "LOGGING_INTERVAL": "step",
+            "TOK_K_CHECKPOINTS": 1,
+            "CHECKPOINT_DIR": "./checkpoints",
+            "CHECKPOINT_MONITOR": "val_loss",
+            "CHECKPOINT_MODE": "min",
+            "MODEL_SUMMARY_MAX_DEPTH": 3,
+            "VAL_CHECK_INTERVAL": 0.25
+        }
+    }
+}

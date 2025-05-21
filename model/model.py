@@ -1,18 +1,17 @@
 import copy
-from typing import Callable, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from transformers import BertTokenizer
-from x_transformers import Encoder
-from x_transformers.x_transformers import ScaledSinusoidalEmbedding
+import transformers
+from transformers.models.bert import BertEmbeddings
 
 from utils.types import Number
 
-from .base_model import JEPA_base
-from .predictor import Predictor
+from .text import TextEncoder
+from .vision.base_model import JEPA_base
 
 # pylint: disable=pointless-string-statement
 
@@ -1090,200 +1089,267 @@ class VJEPA(JEPA_base, pl.LightningModule):
 class TJEPA(pl.LightningModule):
     def __init__(
         self,
-        embed_dim: int = 64,
-        enc_depth: int = 8,
-        num_heads: int = 8,
-        layer_dropout: float = 0.0,
-        decoder_depth: int = 4,  # NOTE: Make underpowered to prevent collapse
-        lr: float = 1e-3,
-        weight_decay: float = 0.05,
-        target_prob_range: Tuple[float, float] = (
-            0.15,
-            0.35,
-        ),  # used to generate the number of distinct target tokens
+        tokenizer: transformers.PreTrainedTokenizer,
+        pos_embedding_layer: nn.Module,
+        embedder: Union[BertEmbeddings, nn.Embedding],
+        encoder: TextEncoder,
+        decoder: nn.Module,
+        max_length: int = 128,
+        lr: float = 1e-4,
+        weight_decay: float = 0.01,
+        lr_warmup_fraction: float = 0.01,
+        using_pre_tokenized_dataset: bool = False,
+        target_aspect_ratio: Tuple[float, float] = (0.75, 1.5),
+        target_scale_interval: Tuple[float, float] = (0.15, 0.2),
+        context_aspect_ratio: Union[int, float] = 1,
+        context_scale: Tuple[float, float] = (0.85, 1.0),
         m: float = 0.996,  # momentum
         momentum_limits: Tuple[float, float] = (0.996, 1.0),
-        mode: Literal["test", "train"] = "train",
-        **kwargs,
-    ):
-        pl.LightningModule.__init__(self)
-        self.save_hyperparameters()
-        self.mode = mode.lower()
+    ) -> None:
+        super().__init__()
 
-        # Define hyperparameters
+        self.save_hyperparameters()
+
+        # Define parameters
+        self.max_length = max_length
         self.lr = lr
         self.weight_decay = weight_decay
+        self.lr_warmup_fraction = lr_warmup_fraction
+        self.using_pre_tokenized_dataset = using_pre_tokenized_dataset
         self.m = m  # momentum
-        self.target_prob_range = target_prob_range
+        self.target_aspect_ratio = target_aspect_ratio
+        self.target_scale_interval = target_scale_interval
+        self.context_aspect_ratio = context_aspect_ratio
+        self.context_scale = context_scale
+        self.embed_dim = (
+            embedder.word_embeddings.embedding_dim
+            if hasattr(embedder, "word_embeddings")
+            else embedder.embedding_dim
+        )
+        self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
+        nn.init.trunc_normal_(self.mask_token, 0.02)
 
         # Optimisation parameters
         self.momentum_limits = momentum_limits
         self.criterion = nn.MSELoss()
 
-        self.tokeniser: BertTokenizer = BertTokenizer.from_pretrained(BERT_MODEL_NAME)
-        self.vocab_size = self.tokeniser.vocab_size
-        assert (
-            self.tokeniser.pad_token_id == 0
-        ), f"non-zero pad token id received: {self.tokeniser.pad_token_id=}"
+        self.tokenizer = tokenizer
+        self.pos_embedding_layer = pos_embedding_layer
+        self.token_embedder = embedder
+        self.encoder: TextEncoder = encoder  # student
+        self.decoder = decoder
 
-        self.embed_dim = embed_dim
-        self.end_depth = enc_depth
-        self.num_heads = num_heads
-        self.layer_dropout = layer_dropout
+        self.teacher_encoder: TextEncoder = copy.deepcopy(self.encoder)
+        # Unfreeze student
+        self.encoder.unfreeze()
+        # Freeze teacher (updated via EMA)
+        self.teacher_encoder.freeze()
 
-        self.embedding_layer = nn.Embedding(self.vocab_size, self.embed_dim)
+        self.total_steps: Optional[int] = None
 
-        self.encoder = Encoder(
-            dim=embed_dim,
-            heads=num_heads,
-            depth=enc_depth,
-            layer_dropout=self.layer_dropout,
-        )  # student encoder
+    def setup(self, stage: Optional[str] = None) -> None:
+        train_loader = self.trainer.datamodule.train_dataloader()
+        self.total_steps = len(train_loader) * self.trainer.max_epochs
 
-        self.teacher_encoder = copy.deepcopy(
-            self.encoder
-        ).cuda()  # copy student encoder
-
-        self.predictor = Predictor(
-            embed_dim=self.embed_dim,
-            num_heads=self.num_heads // 2,
-            depth=decoder_depth,
-            layer_dropout=self.layer_dropout,
-        )
-
-        self.pos_embedding = ScaledSinusoidalEmbedding(self.embed_dim)
-
-        self.mask_token = nn.Parameter(torch.randn(1, 1, self.embed_dim))
-        nn.init.trunc_normal_(self.mask_token, 0.02)
-
-    @staticmethod
-    def generate_target_indices(
-        sequence_batch: torch.Tensor,
-        # attention_masks: torch.Tensor,
-        target_prob_range: Tuple[float, float],
-        # ) -> List[List[int]]:
-    ) -> torch.Tensor:
+    def _tokenize_batch(self, texts: List[str]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Generate target indices for a 1D sequence.
+        Tokenize a batch of texts and return the token IDs and attention mask.
 
         Args:
-            sequence_batch (torch.Tensor): The sequence of tokens to generate target tokens for.
-            attention_masks (torch.Tensor): The attention masks corresponding to the sequence batch.
-            target_prob_range (Tuple[float, float]): The range of probabilities of a given token being a target.
+            texts: A list of strings to tokenize.
 
         Returns:
-            List[List[int]]: A list of lists containing indices of target tokens.
-            torch.Tensor: A boolean tensor containing indices of target tokens.
+            A tuple of two tensors: the first containing the input token IDs and the
+            second containing the attention mask.
         """
-        target_prob: float = np.random.uniform(
-            low=target_prob_range[0], high=target_prob_range[1]
+        encoding = self.tokenizer(
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.max_length,
         )
 
-        # target_indices: List[List[int]] = []
+        return encoding["input_ids"], encoding["attention_mask"]
 
-        # for sequence in sequence_batch:
-        #     sequence_length: int = torch.count_nonzero(
-        #         sequence
-        #     )  # NOTE: The tokeniser padding token is 0
-
-        #     num_target_tokens: int = max(int(sequence_length * target_prob), 1)
-        #     # Randomly select 'num_target_tokens' indices from the sequence
-        #     indices: torch.Tensor = torch.randperm(sequence_length)[:num_target_tokens]
-        #     target_indices.append(indices.tolist())
-        target_indices: torch.Tensor = torch.bernoulli(
-            torch.full(sequence_batch.shape, target_prob)  # target_probability_matrix
-        ).bool()
-
-        return target_indices
-
-    @staticmethod
-    def generate_context_indices(
-        sequence_batch: torch.Tensor,
-        # attention_masks: torch.Tensor,
-        target_prob_range: Tuple[float, float],
-        # ) -> List[List[int]]:
-    ) -> torch.Tensor:
+    def _get_tokens_from_batch(
+        self, batch: Union[Dict[str, torch.Tensor], List[str]]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Generate context tokens for a 1D sequence.
+        Converts a batch of raw texts or pre-tokenized tensors into a pair of tensors
+        representing the input token IDs and attention mask.
 
         Args:
-            sequence_batch (torch.Tensor): The sequence of tokens to generate target tokens for.
-            attention_masks (torch.Tensor): The attention masks corresponding to the sequence batch.
-            target_prob_range (Tuple[float, float]): The range of probabilities of a given token being a target.
+            batch: A list of strings or a dictionary of tensors containing pre-tokenized
+                input IDs and attention masks.
 
         Returns:
-            List[List[int]]: A list of lists containing indices of context tokens.
-            torch.Tensor: A boolean tensor containing indices of context tokens.
+            A tuple of two tensors: the first containing the input token IDs and the
+            second containing the attention mask.
         """
-        context_prob: float = 1 - np.random.uniform(
-            low=target_prob_range[0], high=target_prob_range[1]
+        if self.using_pre_tokenized_dataset or isinstance(batch, dict):
+            token_ids = batch["input_ids"].to(self.device)
+            attention_mask = batch["attention_mask"].to(self.device)
+
+        elif isinstance(batch, list):
+            token_ids, attention_mask = self._tokenize_batch(batch)
+            token_ids, attention_mask = token_ids.to(self.device), attention_mask.to(
+                self.device
+            )
+
+        else:
+            raise ValueError("Unsupported batch type.")
+
+        return token_ids, attention_mask
+
+    def add_positional_embedding(self, tokens: torch.Tensor) -> torch.Tensor:
+        """
+        Update input tokens with positional embeddings.
+
+        Args:
+            token_ids: A tensor of shape `(batch_size, seq_len)` containing input tokens.
+
+        Returns:
+            A tensor of shape `(batch_size, seq_len, embed_dim)` containing the tokens with positional embeddings.
+        """
+        return tokens + self.pos_embedding_layer(tokens)
+
+    def _embed_with_positional(self, token_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Embed input token IDs with positional embeddings.
+
+        Args:
+            token_ids: A tensor of shape `(batch_size, seq_len)` containing input token IDs.
+
+        Returns:
+            A tensor of shape `(batch_size, seq_len, embed_dim)` containing the embedded token IDs with positional embeddings.
+        """
+        embeddings = self.token_embedder(token_ids)
+        embeddings = self.add_positional_embedding(embeddings)
+
+        return embeddings
+
+    def get_target_context_probs(self) -> Tuple[float, float]:
+        """
+        Sample target and context probabilities.
+        """
+        target_scale = np.random.uniform(
+            low=self.target_scale_interval[0], high=self.target_scale_interval[1]
+        )
+        context_scale = np.random.uniform(
+            low=self.context_scale[0], high=self.context_scale[1]
         )
 
-        # context_indices: List[List[int]] = []
+        return target_scale, context_scale
 
-        # for sequence in sequence_batch:
-        #     sequence_length: int = torch.count_nonzero(
-        #         sequence
-        #     )  # NOTE: The tokeniser padding token is 0
+    def sample_target_context_indices(
+        self, shape: torch.Size
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Sample exactly a fixed number of target and context indices for each batch item,
+        based on the target and context probabilities.
 
-        #     num_context_tokens: int = max(int(sequence_length * context_prob), 1)
-        #     # Randomly select 'num_context_tokens' indices from the sequence
-        #     indices: torch.Tensor = torch.randperm(sequence_length)[:num_context_tokens]
-        #     context_indices.append(indices.tolist())
-        context_indices: torch.Tensor = torch.bernoulli(
-            torch.full(sequence_batch.shape, context_prob)  # context_probability_matrix
-        ).bool()
+        Args:
+            shape (torch.Size): The shape (batch_size, seq_len) for sampling.
 
-        return context_indices
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                target_indices and context_indices, both of shape (batch_size, seq_len), dtype=bool.
+        """
+        batch_size, seq_len = shape
+        target_scale, context_scale = self.get_target_context_probs()
+
+        num_target: int = max(1, int(seq_len * target_scale))
+        num_context: int = max(1, int(seq_len * context_scale))
+
+        target_indices: torch.Tensor = torch.zeros(
+            (batch_size, seq_len), dtype=torch.bool, device=self.device
+        )
+        context_indices: torch.Tensor = torch.zeros(
+            (batch_size, seq_len), dtype=torch.bool, device=self.device
+        )
+
+        for i in range(batch_size):
+            perm: torch.Tensor = torch.randperm(seq_len, device=self.device)
+
+            target_idx: torch.Tensor = perm[:num_target]
+            context_idx: torch.Tensor = perm[num_target : num_target + num_context]
+
+            target_indices[i, target_idx] = True
+            context_indices[i, context_idx] = True
+
+        return target_indices, context_indices
 
     def forward(
         self,
-        x: torch.Tensor,  # (batch_size, seq_length)
-        # attention_masks: torch.Tensor,
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
-        # target_indices: List[List[int]] = TJEPA.generate_target_indices(
-        target_indices: torch.Tensor = TJEPA.generate_target_indices(
-            sequence_batch=x,  # (batch_size, seq_length)
-            target_prob_range=self.target_prob_range,
+        token_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Carries out a single forward pass.
+
+        Args:
+            token_ids: A tensor of shape `(batch_size, seq_len)` containing input token IDs.
+            attention_mask: A tensor of shape `(batch_size, seq_len)` containing the attention mask.
+
+        Returns:
+            A dictionary containing the loss, predictions, forecast, and backcast.
+        """
+        token_embeddings = self._embed_with_positional(token_ids)
+        # # TODO: Handle positional embeddings
+        # token_embeddings = self.add_positional_embedding(token_ids)
+        # # embed_dim = token_embeddings.shape[-1]
+
+        batch_size, seq_len = token_ids.shape
+        batch_size, seq_len, embed_dim = token_embeddings.shape
+
+        # Sample targets and context
+        target_indices, context_indices = self.sample_target_context_indices(
+            token_ids.shape
         )
-        # context_indices: List[List[int]] = TJEPA.generate_context_indices(
-        context_indices: torch.Tensor = TJEPA.generate_context_indices(
-            sequence_batch=x,  # (batch_size, seq_length)
-            target_prob_range=self.target_prob_range,
-        )
 
-        x = self.embedding_layer(x)  # (batch_size, seq_length, embed_dim)
-
-        x = x + self.pos_embedding(x)  # (batch_size, seq_length, embed_dim)
-
-        if self.mode == "test":
-            return self.encoder(x)  # (batch_size, seq_length, embed_dim)
-
-        target_embeddings: torch.Tensor = x[
-            None, target_indices
-        ]  # (batch_size, num_target_tokens, embed_dim)
-        context_embeddings: torch.Tensor = x[
-            None, context_indices
-        ]  # (batch_size, num_context_tokens, embed_dim)
-
-        target_encoding: torch.Tensor = self.teacher_encoder(
-            target_embeddings
+        target_embeddings = (
+            token_embeddings[target_indices]
+            .contiguous()
+            .view(batch_size, -1, embed_dim)
         )  # (batch_size, num_target_tokens, embed_dim)
-        context_encoding: torch.Tensor = self.encoder(
-            context_embeddings
+        context_embeddings = (
+            token_embeddings[context_indices]
+            .contiguous()
+            .view(batch_size, -1, embed_dim)
         )  # (batch_size, num_context_tokens, embed_dim)
 
-        batch_dim, num_tokens, _ = target_embeddings.shape
-        target_masks: torch.Tensor = self.mask_token.repeat(batch_dim, num_tokens, 1)
-        assert target_masks.shape == target_embeddings.shape
+        # Encode
+        target_encodings = self.teacher_encoder(
+            target_embeddings
+        )  # "Ground truth" (Privileged hypothesis)
+        context_encodings = self.encoder(
+            context_embeddings
+        )  # Context (Unprivileged hypothesis)
 
-        return (
-            self.predictor(
-                context_encoding=context_encoding,
-                target_masks=target_masks,
-            ),
-            target_encoding,
+        # Masked targets
+        target_masks = self.mask_token.expand(
+            batch_size, target_encodings.shape[1], embed_dim  # num_patches
         )
+
+        # Prepare decoder input
+        decoder_input = torch.cat([context_encodings, target_masks], dim=1)
+
+        # Decode
+        decoded_output = self.decoder(decoder_input)
+
+        # Take only predictions for target part
+        pred_targets = decoded_output[:, -target_masks.shape[1] :, :]
+
+        # Loss: predict target embeddings
+        loss = self.criterion(pred_targets, target_embeddings)
+
+        return {
+            "loss": loss,
+            "context": context_embeddings,
+            "targets": target_embeddings,
+            "predictions": pred_targets,
+        }
 
     def update_momentum(self, m: float) -> None:
         """
@@ -1316,9 +1382,15 @@ class TJEPA(pl.LightningModule):
                     other=student_param.data, alpha=1 - m
                 )
 
+    def on_after_backward(self) -> None:
+        self.update_momentum(self.m)
+        self.m += (
+            self.momentum_limits[1] - self.momentum_limits[0]
+        ) / self.trainer.estimated_stepping_batches
+
     def training_step(  # pylint: disable=arguments-differ
         self,
-        batch: Tuple[torch.Tensor, torch.Tensor],
+        batch: Union[Dict[str, torch.Tensor], List[str]],
         batch_idx: int,  # pylint: disable=unused-argument
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
@@ -1327,8 +1399,9 @@ class TJEPA(pl.LightningModule):
 
         Parameters
         ----------
-        batch: torch.Tensor
-            Batch of text sequences and attention masks to train on.
+        batch: Union[Dict[str, torch.Tensor], List[str]]
+            A list of raw text strings or, if `using_pre_tokenized_dataset` is True, a dictionary
+            of tensors containing pre-tokenized input IDs and attention masks.
         batch_idx: int
             Index of the batch.
         dataloader_idx: int
@@ -1339,78 +1412,90 @@ class TJEPA(pl.LightningModule):
         torch.Tensor
             Training loss.
         """
-        # x, attention_masks = batch
-        (
-            y_student,  # (batch_size, target_block_size, embed_dim)
-            y_teacher,  # (batch_size, target_block_size, embed_dim)
-        ) = self(
-            # x=x,  # (batch_size, seq_length)
-            x=batch,  # (batch_size, seq_length)
-            # attention_masks=attention_masks,  # (batch_size, seq_length)
-        )
+        # Extract token IDs and attention masks
+        token_ids, attention_mask = self._get_tokens_from_batch(batch)
 
-        loss: torch.Tensor = self.criterion(y_student, y_teacher)
-        self.log("train_loss", loss)
+        # Forward pass
+        outputs: Dict[str, torch.Tensor] = self(token_ids, attention_mask)
+        loss = outputs["loss"]
+
+        self.log(
+            "train_loss",
+            loss,
+            # prog_bar=True,
+            # on_epoch=True,
+            # on_step=True,
+            # batch_size=len(batch),
+        )
 
         return loss
 
     def validation_step(  # pylint: disable=arguments-differ
         self,
-        batch: Tuple[torch.Tensor, torch.Tensor],
+        batch: torch.Tensor,
         batch_idx: int,  # pylint: disable=unused-argument
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
-        """
-        Perform validation step for batch of text sequences.
+        # Extract token IDs and attention masks
+        token_ids, attention_mask = self._get_tokens_from_batch(batch)
 
-        Parameters
-        ----------
-        batch: torch.Tensor
-            Batch of text sequences and attention masks to train on.
-        batch_idx: int
-            Index of the batch.
-        dataloader_idx: int
-            Index of the dataloader.
+        # Forward pass
+        outputs: Dict[str, torch.Tensor] = self(token_ids, attention_mask)
+        loss = outputs["loss"]
 
-        Returns
-        -------
-        torch.Tensor
-            The student embedding of the input sequence.
-        """
-        # x, attention_masks = batch
-        (
-            y_student,  # (batch_size, target_block_size, embed_dim)
-            y_teacher,  # (batch_size, target_block_size, embed_dim)
-        ) = self(
-            # x=x,  # (batch_size, seq_length)
-            x=batch,  # (batch_size, seq_length)
-            # attention_masks=attention_masks,  # (batch_size, seq_length)
-        )  # (batch_size, seq_length, embed_dim)
+        self.log(
+            "val_loss",
+            loss,
+            # prog_bar=True,
+            # on_epoch=True,
+            # on_step=True,
+            # batch_size=len(batch),
+        )
 
-        loss: torch.Tensor = self.criterion(y_student, y_teacher)
-        self.log("val_loss", loss)
+        return loss
+
+    def test_step(  # pylint: disable=arguments-differ
+        self,
+        batch: torch.Tensor,
+        batch_idx: int,  # pylint: disable=unused-argument
+        dataloader_idx: int = 0,  # pylint: disable=unused-argument
+    ) -> torch.Tensor:
+        # Extract token IDs and attention masks
+        token_ids, attention_mask = self._get_tokens_from_batch(batch)
+
+        # Forward pass
+        outputs: Dict[str, torch.Tensor] = self(token_ids, attention_mask)
+        loss = outputs["loss"]
+
+        self.log(
+            "test_loss",
+            loss,
+            # prog_bar=True,
+            # on_epoch=True,
+            # on_step=True,
+            # batch_size=len(batch),
+        )
 
         return loss
 
     def predict_step(  # pylint: disable=arguments-differ
         self,
-        batch: Tuple[torch.Tensor, torch.Tensor],
+        batch: torch.Tensor,
         batch_idx: int,  # pylint: disable=unused-argument
         dataloader_idx: int = 0,  # pylint: disable=unused-argument
     ) -> torch.Tensor:
         self.mode = "test"
 
-        x, attention_masks = batch
-        return self(
-            x=x,  # (batch_size, seq_length)
-            # attention_masks=attention_masks,  # (batch_size, seq_length)
-        )  # (batch_size, seq_length, embed_dim)
+        # Get input tokens and embeddings
+        token_ids, _ = self._get_tokens_from_batch(batch)
+        token_embeddings = self._embed_with_positional(token_ids)
 
-    def on_after_backward(self) -> None:
-        self.update_momentum(self.m)
-        self.m += (
-            self.momentum_limits[1] - self.momentum_limits[0]
-        ) / self.trainer.estimated_stepping_batches
+        outputs = {"token_ids": token_ids}
+
+        predictions = self.decoder(token_embeddings)
+        outputs["predictions"] = predictions
+
+        return outputs
 
     def configure_optimizers(
         self,
