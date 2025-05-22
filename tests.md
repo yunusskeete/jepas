@@ -12,6 +12,11 @@
 [X] - Text dataset
 
 ## Profiling
-[ ] - Image profiling
-[ ] - Video profiling
+[X] - Image profiling
+[X] - Video profiling
 [ ] - Text profiling
+
+## Pretraining
+[ ] - Image pretraining
+[ ] - Video pretraining
+[ ] - Text pretraining

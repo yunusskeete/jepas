@@ -4,8 +4,7 @@ from typing import Callable, Optional, Tuple, TypeVar
 import torch
 
 from model.seed import seed_everything
-
-T = TypeVar("T")  # generic model type
+from utils.types import T
 
 
 def save_model_weights(

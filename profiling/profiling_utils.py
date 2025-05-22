@@ -72,23 +72,39 @@ class GPUUtilTracker:
 
 def step(
     model: nn.Module,
-    batch: Union[Dict[str, torch.Tensor], List[str]],
+    batch: Union[torch.Tensor, Dict[str, torch.Tensor], List[str]],
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     precision: int,
 ) -> None:
-    if isinstance(batch, dict) and "input_ids" in batch:
+    if isinstance(batch, torch.Tensor):
+        x = batch.to(device)
+        inputs = {
+            "x": x,
+            "target_aspect_ratio": 0.75,
+            "target_scale": 0.15,
+            "context_aspect_ratio": 1.0,
+            "context_scale": 0.85,
+        }
+    elif isinstance(batch, dict) and "input_ids" in batch:
         token_ids = batch["input_ids"].to(device)
         attention_mask = batch["attention_mask"].to(device)
+        inputs = {"input_ids": token_ids, "attention_mask": attention_mask}
     else:
         token_ids, attention_mask = model.tokenize_batch(batch)
         token_ids, attention_mask = token_ids.to(device), attention_mask.to(device)
+        inputs = {"input_ids": token_ids, "attention_mask": attention_mask}
 
     optimizer.zero_grad()
     with autocast(enabled=bool(precision)):
-        outputs = model.forward(token_ids, attention_mask)
+        outputs = model.forward(**inputs)
 
-    loss = outputs["loss"]
+    if isinstance(outputs, tuple):
+        y_student, y_teacher = outputs
+        loss = model.criterion(y_student, y_teacher)
+    else:
+        loss = outputs["loss"]
+
     loss.backward()
     optimizer.step()
 
@@ -119,7 +135,6 @@ def measure_throughput(
             device=device,
             precision=precision,
         )
-        assert batch_size == len(batch["input_ids"])
 
         if idx >= steps:
             break

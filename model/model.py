@@ -8,10 +8,9 @@ import torch.nn as nn
 import transformers
 from transformers.models.bert.modeling_bert import BertEmbeddings
 
+from model.text import TextEncoder
+from model.vision.base_model import JEPA_base
 from utils.types import Number
-
-from .text import TextEncoder
-from .vision.base_model import JEPA_base
 
 # pylint: disable=pointless-string-statement
 
@@ -291,8 +290,6 @@ class IJEPA(JEPA_base, pl.LightningModule):
 
         assert len(context_patches) == len(_context_patches)
         assert context_patches == _context_patches
-
-        print("Assertions passed")
 
         return context_patches
 
@@ -734,8 +731,6 @@ class VJEPA(JEPA_base, pl.LightningModule):
         assert target_patches == _target_patches
         assert all_patches == _all_patches
 
-        print("Assertions passed")
-
         return target_patches, all_patches
 
     @staticmethod
@@ -827,8 +822,6 @@ class VJEPA(JEPA_base, pl.LightningModule):
 
         assert len(context_patches) == len(_context_patches)
         assert context_patches == _context_patches
-
-        print("Assertions passed")
 
         return context_patches
 

@@ -15,7 +15,7 @@ from configs import (
 from jepa_datasets import ImageDataset
 from model import IJEPA
 from model.image import ijepa_model_builders
-from profiling.utils import GPUUtilTracker, measure_throughput
+from profiling.profiling_utils import GPUUtilTracker, measure_throughput
 
 # EXPERIMENT
 experiment_config = get_image_experiment_config()
@@ -48,10 +48,7 @@ if __name__ == "__main__":
 
     # 1. Instantiate model with fixed initialisation
     model_id = f"{MODEL_SIZE}_{SEED}_{LR:.1e}"
-    model: IJEPA = ijepa_model_builders[MODEL_SIZE](
-        image_config=image_config,
-        seed=SEED,
-    )
+    model: IJEPA = ijepa_model_builders[MODEL_SIZE]()
     print(f"✅ Model loaded: {model_id}")
 
     # 2. Load dataset

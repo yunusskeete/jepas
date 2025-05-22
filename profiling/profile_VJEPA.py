@@ -16,7 +16,7 @@ from configs import (
 from jepa_datasets import VideoDataset
 from model import VJEPA
 from model.video import vjepa_model_builders
-from profiling.utils import GPUUtilTracker, measure_throughput
+from profiling.profiling_utils import GPUUtilTracker, measure_throughput
 
 # EXPERIMENT
 experiment_config = get_video_experiment_config()
@@ -49,10 +49,7 @@ if __name__ == "__main__":
 
     # 1. Instantiate model with fixed initialisation
     model_id = f"{MODEL_SIZE}_{SEED}_{LR:.1e}"
-    model: VJEPA = vjepa_model_builders[MODEL_SIZE](
-        video_config=video_config,
-        seed=SEED,
-    )
+    model: VJEPA = vjepa_model_builders[MODEL_SIZE]()
     print(f"✅ Model loaded: {model_id}")
 
     # 2. Load dataset
