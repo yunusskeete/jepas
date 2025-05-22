@@ -1,5 +1,11 @@
 # Tests
 
+## Model
+[X] - ViT zoo
+[X] - IJEPA zoo
+[X] - VJEPA zoo
+[X] - TJEPA zoo
+
 ## Data
 [X] - Image dataset
 [X] - Video dataset
@@ -9,9 +15,3 @@
 [ ] - Image profiling
 [ ] - Video profiling
 [ ] - Text profiling
-
-## Model
-[ ] - ViT zoo
-[ ] - IJEPA zoo
-[ ] - VJEPA zoo
-[ ] - TJEPA zoo

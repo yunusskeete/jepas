@@ -8,6 +8,7 @@ checkpoints/
 misc/
 finetune/
 model/walkthroughs
+initial_weights/
 
 JEPA.drawio
 .$JEPA.drawio.bkp

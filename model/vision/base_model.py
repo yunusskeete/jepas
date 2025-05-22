@@ -31,9 +31,9 @@ class JEPA_base(VisionTransformer):
             nn.LayerNorm(self.embed_dim) if self.post_enc_norm else nn.Identity()
         )
 
-        self.teacher_encoder = copy.deepcopy(
-            self.encoder
-        ).cuda()  # copy student encoder
+        self.teacher_encoder = copy.deepcopy(self.encoder).to(
+            self.device
+        )  # copy student encoder
 
         # TODO: To help prevent colapse and prioritise expressive representations
         # in the encoder, the decoder should be underpowered with respect to the encoder.

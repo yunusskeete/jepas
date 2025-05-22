@@ -1,10 +1,7 @@
-from typing import Callable, Dict, Optional
-
-import torch
+from typing import Callable, Dict
 
 from configs import get_image_experiment_config, get_image_model_config
 from model.model import IJEPA
-from model.seed import seed_everything
 from model.vision import get_model_config as get_vit_config
 
 experiment_config = get_image_experiment_config()
@@ -52,115 +49,52 @@ def create_ijepa_model(vit_size: str) -> IJEPA:
     )
 
 
-def ijepa_nano() -> IJEPA:
-    return create_ijepa_model(vit_size="nano")
+def make_ijepa_builder(size: str) -> Callable[[], IJEPA]:
+    def builder() -> IJEPA:
+        return create_ijepa_model(vit_size=size)
+
+    builder.__name__ = f"ijepa_{size}_builder"
+
+    return builder
 
 
-def ijepa_tiny() -> IJEPA:
-    return create_ijepa_model(vit_size="tiny")
-
-
-def ijepa_small() -> IJEPA:
-    return create_ijepa_model(vit_size="small")
-
-
-def ijepa_base() -> IJEPA:
-    return create_ijepa_model(vit_size="base")
-
-
-def ijepa_large() -> IJEPA:
-    return create_ijepa_model(vit_size="large")
-
-
-def ijepa_huge() -> IJEPA:
-    return create_ijepa_model(vit_size="huge")
-
-
-def ijepa_gigantic() -> IJEPA:
-    return create_ijepa_model(vit_size="gigantic")
-
-
-ijepa_model_builders: Dict[
-    str,
-    Callable[..., IJEPA],
-] = {
-    "tiny": ijepa_tiny,
-    "small": ijepa_small,
-    "base": ijepa_base,
-    "large": ijepa_large,
-    "huge": ijepa_huge,
-    "gigantic": ijepa_gigantic,
+ijepa_model_builders: Dict[str, Callable[[], IJEPA]] = {
+    size: make_ijepa_builder(size) for size in MODEL_SIZES
 }
 
 
-def save_initial_weights(
-    filepath: str,
-    constructor: Optional[Callable[..., IJEPA]] = ijepa_tiny,
-    seed: Optional[int] = None,
-) -> IJEPA:
-    if seed is not None:
-        seed_everything(seed)
-
-    model, _, _ = constructor()
-    torch.save(model.state_dict(), filepath)
-
-    print(f"✅ Initial weights saved to '{filepath}'")
-
-    return model
-
-
-def load_initial_weights(
-    filepath: str,
-    constructor: Optional[Callable[..., IJEPA]] = ijepa_tiny,
-) -> IJEPA:
-    model, _, _ = constructor()
-
-    print(f"⏳ Loading initial weights from '{filepath}'")
-
-    state_dict = torch.load(filepath)
-    model.load_state_dict(state_dict)
-
-    print(f"✅ Loaded initial weights from '{filepath}'")
-
-    return model
-
-
 if __name__ == "__main__":
-    import hashlib
-
-    def checksum_model(model: torch.nn.Module) -> str:
-        all_params = torch.cat(
-            [p.detach().flatten().cpu() for p in model.parameters() if p.requires_grad]
-        )
-
-        return hashlib.md5(all_params.numpy().tobytes()).hexdigest()
+    from model.checksum import model_checksum
+    from model.save_load_weights import load_model_weights, save_model_weights
 
     # 1. Save initial weights
-    path_to_initial_weights: str = "./initial_weights/initial_model_weights_tiny.pt"
+    path_to_initial_weights: str = "./initial_weights/initial_image_weights_tiny.pt"
 
-    b_tjepa_init: IJEPA = save_initial_weights(
+    ijepa_tiny_builder: Callable[[], IJEPA] = ijepa_model_builders["tiny"]
+
+    b_tjepa_init: IJEPA = save_model_weights(
         filepath=path_to_initial_weights,
-        constructor=ijepa_tiny,
+        constructor=ijepa_tiny_builder,
         seed=experiment_config["SEED"],
     )
     print(f"✅ Model saved to {path_to_initial_weights}")
 
-    b_tjepa_loaded = load_initial_weights(
+    b_tjepa_loaded = load_model_weights(
         filepath=path_to_initial_weights,
-        constructor=ijepa_tiny,
+        constructor=ijepa_tiny_builder,
     )
     print(f"✅ Model 1 loaded from {path_to_initial_weights}")
 
-    u_tjepa_loaded = load_initial_weights(
+    u_tjepa_loaded = load_model_weights(
         filepath=path_to_initial_weights,
-        constructor=ijepa_tiny,
+        constructor=ijepa_tiny_builder,
     )
     print(f"✅ Model 2 loaded from {path_to_initial_weights}")
 
     assert (
-        (checksum := checksum_model(b_tjepa_init))
-        == checksum_model(b_tjepa_loaded)
-        == checksum_model(u_tjepa_loaded)
+        (checksum := model_checksum(b_tjepa_init))
+        == model_checksum(b_tjepa_loaded)
+        == model_checksum(u_tjepa_loaded)
     )
 
     print(f"✅ Model checksums match: {checksum}")

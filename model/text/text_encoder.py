@@ -3,7 +3,7 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 from transformers import BertModel
-from transformers.models.bert import BertEncoder
+from transformers.models.bert.modeling_bert import BertEncoder
 from x_transformers import Encoder
 
 
@@ -54,12 +54,18 @@ def create_text_encoder(
         )
 
     return (
-        bert_model.encoder
+        TextEncoder(
+            encoder=bert_model.encoder,
+            is_bert=is_bert,
+        )
         if is_bert
-        else Encoder(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            num_layers=num_layers,
-            layer_dropout=layer_dropout,
+        else TextEncoder(
+            encoder=Encoder(
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                num_layers=num_layers,
+                layer_dropout=layer_dropout,
+            ),
+            is_bert=is_bert,
         )
     )

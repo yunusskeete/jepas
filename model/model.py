@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import transformers
-from transformers.models.bert import BertEmbeddings
+from transformers.models.bert.modeling_bert import BertEmbeddings
 
 from utils.types import Number
 
@@ -1108,7 +1108,9 @@ class TJEPA(pl.LightningModule):
     ) -> None:
         super().__init__()
 
-        self.save_hyperparameters()
+        self.save_hyperparameters(
+            ignore=["pos_embedding_layer", "embedder", "encoder", "decoder"]
+        )
 
         # Define parameters
         self.max_length = max_length
