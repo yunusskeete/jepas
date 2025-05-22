@@ -9,12 +9,17 @@ from pathlib import Path
 
 from torch.utils.data import DataLoader
 
-from configs import video_config
-from configs import video_dataset_config as dataset_config
-from configs import video_experiment_config as experiment_config
+from configs import (
+    get_video_config,
+    get_video_dataset_config,
+    get_video_experiment_config,
+)
 from jepa_datasets.video import VideoDataModule, VideoDataset, create_video_datamodule
 
 if __name__ == "__main__":
+    dataset_config = get_video_dataset_config()
+    experiment_config = get_video_experiment_config()
+
     dataset_path: Path = Path(dataset_config["DATASET_PATH"]).resolve()
 
     test_vjepa_loader = DataLoader(
@@ -39,7 +44,7 @@ if __name__ == "__main__":
         )  # Should print torch.Size([batch_size, num_channels=3, clip_length, img_height, img_width])
         break
 
-    dataset: VideoDataModule = create_video_datamodule(video_config=video_config)
+    dataset: VideoDataModule = create_video_datamodule(video_config=get_video_config())
     dataset.setup()
 
     test_dataloader: DataLoader = dataset.test_dataloader()

@@ -2,11 +2,13 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from configs import text_config
-from configs import text_dataset_config as dataset_config
-from configs import text_experiment_config as experiment_config
-from configs import text_runtime_config as runtime_config
-from configs import text_tracking_config as tracking_config
+from configs import (
+    get_text_config,
+    get_text_dataset_config,
+    get_text_experiment_config,
+    get_text_runtime_config,
+    get_text_tracking_config,
+)
 from jepa_datasets import (
     TextDataModule,
     create_text_datamodule,
@@ -15,6 +17,7 @@ from jepa_datasets import (
 from model.text import tjepa_model_builders
 
 # EXPERIMENT
+experiment_config = get_text_experiment_config()
 MODEL_NAME: str = experiment_config["MODEL_NAME"]
 MODEL_SIZE: str = experiment_config["MODEL_SIZE"]
 LR: float = experiment_config["LR"]
@@ -24,6 +27,7 @@ GRADIENT_CLIP_VAL: float = experiment_config["GRADIENT_CLIP_VAL"]
 USE_ENCODER: bool = experiment_config["USE_ENCODER"]
 
 # TRACKING
+tracking_config = get_text_tracking_config()
 LOG_DIR: str = tracking_config["LOG_DIR"]
 LOGGING_INTERVAL: str = tracking_config["LOGGING_INTERVAL"]
 TOK_K_CHECKPOINTS: int = tracking_config["TOK_K_CHECKPOINTS"]
@@ -33,17 +37,21 @@ CHECKPOINT_MODE: str = tracking_config["CHECKPOINT_MODE"]
 VAL_CHECK_INTERVAL: float = tracking_config["VAL_CHECK_INTERVAL"]
 
 # RUNTIME
+runtime_config = get_text_runtime_config()
 ACCELERATOR: str = runtime_config["ACCELERATOR"]
 DEVICES: int = runtime_config["DEVICES"]
 PRECISION: int = runtime_config["PRECISION"]
 
 # DATASET
+dataset_config = get_text_dataset_config()
 DATASET_TRAIN_FRACTION: float = dataset_config["DATASET_TRAIN_FRACTION"]
 
 if __name__ == "__main__":
     import gc
 
     import torch
+
+    text_config = get_text_config()
 
     torch.set_float32_matmul_precision(runtime_config["FLOAT32_MATMUL_PRECISION"])
 

@@ -1,10 +1,12 @@
 from datasets import load_dataset
 from transformers import BertTokenizerFast
 
-from configs import text_dataset_config as dataset_config
-from configs import text_dataset_tokenization_config as tokenization_config
+from configs import get_text_dataset_config, get_text_dataset_tokenization_config
 
 if __name__ == "__main__":
+    dataset_config = get_text_dataset_config()
+    tokenization_config = get_text_dataset_tokenization_config()
+
     # 1. Load HuggingFace dataset and tokenizer
     dataset = load_dataset(
         dataset_config["UNTOKENIZED_DATASET_NAME"],

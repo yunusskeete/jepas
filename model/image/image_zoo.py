@@ -2,11 +2,13 @@ from typing import Callable, Dict, Optional
 
 import torch
 
-from configs import image_experiment_config as experiment_config
-from configs import image_model_config as model_config
+from configs import get_image_experiment_config, get_image_model_config
 from model.model import IJEPA
 from model.seed import seed_everything
 from model.vision import get_model_config as get_vit_config
+
+experiment_config = get_image_experiment_config()
+model_config = get_image_model_config()
 
 MODEL_SIZES = {
     "nano": {"num_decoder_layers": 2},

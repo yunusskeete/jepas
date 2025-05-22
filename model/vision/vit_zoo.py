@@ -2,10 +2,12 @@ from typing import Callable, Dict, Optional, Tuple
 
 import torch
 
-from configs import image_experiment_config as experiment_config
+from configs import get_image_experiment_config
 from model.seed import seed_everything
 
 from .vit import VisionTransformer
+
+experiment_config = get_image_experiment_config()
 
 MODEL_SIZES = {
     "nano": {"embed_dim": 128, "num_layers": 4, "num_heads": 4},

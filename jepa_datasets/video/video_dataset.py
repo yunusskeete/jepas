@@ -8,7 +8,9 @@ import torch
 from decord import VideoReader, cpu
 from torch.utils.data import Dataset
 
-from configs import video_dataset_config as dataset_config
+from configs import get_video_dataset_config
+
+dataset_config = get_video_dataset_config()
 
 from .video_transforms import VideoTransform, make_transforms
 

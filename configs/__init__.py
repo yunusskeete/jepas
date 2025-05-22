@@ -1,23 +1,13 @@
-import json
+from functools import lru_cache
 from typing import Any, Dict
 
-with open("../config.json", encoding="utf-8") as f:
-    config: Dict[str, Any] = json.load(f)
+from .load_config import load_config
 
-####################################################################################################
 
-# TEXT
+@lru_cache(maxsize=1)
+def get_config() -> Dict[str, Any]:
+    return load_config()
 
-####################################################################################################
-
-text_config: Dict[str, Any] = config["text"]
-text_model_config: Dict[str, Any] = text_config["model"]
-text_dataset_config: Dict[str, Any] = text_config["dataset"]
-text_profiling_config: Dict[str, Any] = text_config["profiling"]
-text_experiment_config: Dict[str, Any] = text_config["experiment"]
-text_runtime_config: Dict[str, Any] = text_config["runtime"]
-text_tracking_config: Dict[str, Any] = text_config["tracking"]
-text_dataset_tokenization_config: Dict[str, Any] = text_dataset_config["tokenization"]
 
 ####################################################################################################
 
@@ -25,14 +15,46 @@ text_dataset_tokenization_config: Dict[str, Any] = text_dataset_config["tokeniza
 
 ####################################################################################################
 
-image_config: Dict[str, Any] = config["image"]
-image_model_config: Dict[str, Any] = image_config["model"]
-image_dataset_config: Dict[str, Any] = image_config["dataset"]
-image_profiling_config: Dict[str, Any] = image_config["profiling"]
-image_experiment_config: Dict[str, Any] = image_config["experiment"]
-image_runtime_config: Dict[str, Any] = image_config["runtime"]
-image_tracking_config: Dict[str, Any] = image_config["tracking"]
-image_dataset_transforms_config: Dict[str, Any] = image_dataset_config["transforms"]
+
+@lru_cache(maxsize=1)
+def get_image_config() -> Dict[str, Any]:
+    return get_config()["image"]
+
+
+@lru_cache(maxsize=1)
+def get_image_model_config() -> Dict[str, Any]:
+    return get_image_config()["model"]
+
+
+@lru_cache(maxsize=1)
+def get_image_dataset_config() -> Dict[str, Any]:
+    return get_image_config()["dataset"]
+
+
+@lru_cache(maxsize=1)
+def get_image_profiling_config() -> Dict[str, Any]:
+    return get_image_config()["profiling"]
+
+
+@lru_cache(maxsize=1)
+def get_image_experiment_config() -> Dict[str, Any]:
+    return get_image_config()["experiment"]
+
+
+@lru_cache(maxsize=1)
+def get_image_runtime_config() -> Dict[str, Any]:
+    return get_image_config()["runtime"]
+
+
+@lru_cache(maxsize=1)
+def get_image_tracking_config() -> Dict[str, Any]:
+    return get_image_config()["tracking"]
+
+
+@lru_cache(maxsize=1)
+def get_image_dataset_transforms_config() -> Dict[str, Any]:
+    return get_image_dataset_config()["transforms"]
+
 
 ####################################################################################################
 
@@ -40,11 +62,89 @@ image_dataset_transforms_config: Dict[str, Any] = image_dataset_config["transfor
 
 ####################################################################################################
 
-video_config: Dict[str, Any] = config["video"]
-video_model_config: Dict[str, Any] = video_config["model"]
-video_dataset_config: Dict[str, Any] = video_config["dataset"]
-video_profiling_config: Dict[str, Any] = video_config["profiling"]
-video_experiment_config: Dict[str, Any] = video_config["experiment"]
-video_runtime_config: Dict[str, Any] = video_config["runtime"]
-video_tracking_config: Dict[str, Any] = video_config["tracking"]
-video_dataset_transforms_config: Dict[str, Any] = video_dataset_config["transforms"]
+
+@lru_cache(maxsize=1)
+def get_video_config() -> Dict[str, Any]:
+    return get_get_config()["video"]
+
+
+@lru_cache(maxsize=1)
+def get_video_model_config() -> Dict[str, Any]:
+    return get_video_config()["model"]
+
+
+@lru_cache(maxsize=1)
+def get_video_dataset_config() -> Dict[str, Any]:
+    return get_video_config()["dataset"]
+
+
+@lru_cache(maxsize=1)
+def get_video_profiling_config() -> Dict[str, Any]:
+    return get_video_config()["profiling"]
+
+
+@lru_cache(maxsize=1)
+def get_video_experiment_config() -> Dict[str, Any]:
+    return get_video_config()["experiment"]
+
+
+@lru_cache(maxsize=1)
+def get_video_runtime_config() -> Dict[str, Any]:
+    return get_video_config()["runtime"]
+
+
+@lru_cache(maxsize=1)
+def get_video_tracking_config() -> Dict[str, Any]:
+    return get_video_config()["tracking"]
+
+
+@lru_cache(maxsize=1)
+def get_video_dataset_transforms_config() -> Dict[str, Any]:
+    return get_video_dataset_config()["transforms"]
+
+
+####################################################################################################
+
+# TEXT
+
+####################################################################################################
+
+
+@lru_cache(maxsize=1)
+def get_text_config() -> Dict[str, Any]:
+    return get_get_config()["text"]
+
+
+@lru_cache(maxsize=1)
+def get_text_model_config() -> Dict[str, Any]:
+    return get_text_config()["model"]
+
+
+@lru_cache(maxsize=1)
+def get_text_dataset_config() -> Dict[str, Any]:
+    return get_text_config()["dataset"]
+
+
+@lru_cache(maxsize=1)
+def get_text_profiling_config() -> Dict[str, Any]:
+    return get_text_config()["profiling"]
+
+
+@lru_cache(maxsize=1)
+def get_text_experiment_config() -> Dict[str, Any]:
+    return get_text_config()["experiment"]
+
+
+@lru_cache(maxsize=1)
+def get_text_runtime_config() -> Dict[str, Any]:
+    return get_text_config()["runtime"]
+
+
+@lru_cache(maxsize=1)
+def get_text_tracking_config() -> Dict[str, Any]:
+    return get_text_config()["tracking"]
+
+
+@lru_cache(maxsize=1)
+def get_text_dataset_tokenization_config() -> Dict[str, Any]:
+    return get_text_dataset_config()["tokenization"]

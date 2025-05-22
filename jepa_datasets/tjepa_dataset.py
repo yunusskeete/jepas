@@ -1,15 +1,24 @@
+"""
+Usage:
+```bash
+python -m jepa_datasets.tjepa_dataset
+```
+"""
+
 from typing import Dict, List, Union
 
 import torch
 
-from configs import text_dataset_config as dataset_config
-from configs import text_experiment_config as experiment_config
+from configs import get_text_dataset_config, get_text_experiment_config
 
 from .text.padding import dynamic_padding_collate
 from .text.text_datamodule import PreTokenizedTextDataset, TextDataModule, TextDataset
 
 if __name__ == "__main__":
     import gc
+
+    dataset_config = get_text_dataset_config
+    experiment_config = get_text_experiment_config
 
     # 1. Load datamodule
     use_pre_tokenized_dataset: bool = dataset_config["USE_PRE_TOKENIZED_DATASET"]

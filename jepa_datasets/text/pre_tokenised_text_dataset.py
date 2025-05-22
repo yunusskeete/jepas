@@ -3,8 +3,9 @@ from typing import Dict, List
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from configs import text_dataset_config as dataset_config
-from configs import text_experiment_config as experiment_config
+from configs import get_text_dataset_config, get_text_experiment_config
+
+dataset_config = get_text_dataset_config()
 
 PAD_TOKEN_ID: int = dataset_config["PAD_TOKEN_ID"]
 
@@ -59,6 +60,8 @@ class PreTokenizedTextDataset:
 if __name__ == "__main__":
     from datasets import load_from_disk
     from torch.utils.data import DataLoader
+
+    experiment_config = get_text_experiment_config()
 
     # 1. Load full dataset
     full_dataset = load_from_disk(dataset_config["TOKENIZED_DATASET_NAME"])

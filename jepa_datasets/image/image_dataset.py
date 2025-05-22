@@ -7,10 +7,11 @@ from PIL import Image
 from torch.utils.data import Dataset as TorchDataset
 from torchvision import transforms
 
-from configs import image_dataset_config as dataset_config
+from configs import get_image_dataset_config
 
 from .image_transforms import make_transforms
 
+dataset_config = get_image_dataset_config()
 # pylint: disable=dangerous-default-value
 
 

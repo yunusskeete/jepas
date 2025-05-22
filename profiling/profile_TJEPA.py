@@ -5,20 +5,28 @@ from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from configs import text_config
-from configs import text_dataset_config as dataset_config
-from configs import text_experiment_config as experiment_config
-from configs import text_profiling_config as profiling_config
-from configs import text_runtime_config as runtime_config
+from configs import get_text_config, get_text_dataset_config
+
+dataset_config = get_text_dataset_config()
+from configs import (
+    get_text_experiment_config,
+    get_text_profiling_config,
+    get_text_runtime_config,
+)
 from jepa_datasets import PreTokenizedTextDataset, TextDataset
 from model import TJEPA
 from model.text import tjepa_model_builders
 from profiling.utils import GPUUtilTracker, measure_throughput
 
+# EXPERIMENT
+experiment_config = get_text_experiment_config()
 MODEL_NAME: str = experiment_config["MODEL_NAME"]
 MODEL_SIZE: str = experiment_config["MODEL_SIZE"]
 LR: float = experiment_config["LR"]
 SEED: int = experiment_config["SEED"]
+
+# PROFILING
+profiling_config = get_text_profiling_config()
 LOG_DIR = profiling_config["LOG_DIR"]
 BATCH_SIZE_OPTIONS: List[int] = profiling_config["BATCH_SIZE_OPTIONS"]
 NUM_WORKERS_OPTIONS: List[int] = profiling_config["NUM_WORKERS_OPTIONS"]
@@ -32,6 +40,9 @@ if __name__ == "__main__":
     import json
 
     import torch
+
+    text_config = get_text_config()
+    runtime_config = get_text_runtime_config()
 
     torch.set_float32_matmul_precision(runtime_config["FLOAT32_MATMUL_PRECISION"])
 

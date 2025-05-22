@@ -1,27 +1,32 @@
-import datetime
 import itertools
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import torch
-import torch.profiler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from configs import video_config
-from configs import video_dataset_config as dataset_config
-from configs import video_experiment_config as experiment_config
-from configs import video_profiling_config as profiling_config
-from configs import video_runtime_config as runtime_config
+from configs import (
+    get_video_config,
+    get_video_dataset_config,
+    get_video_experiment_config,
+    get_video_profiling_config,
+    get_video_runtime_config,
+)
 from jepa_datasets import VideoDataset
 from model import VJEPA
 from model.video import vjepa_model_builders
 from profiling.utils import GPUUtilTracker, measure_throughput
 
+# EXPERIMENT
+experiment_config = get_video_experiment_config()
 MODEL_NAME: str = experiment_config["MODEL_NAME"]
 MODEL_SIZE: str = experiment_config["MODEL_SIZE"]
 LR: float = experiment_config["LR"]
 SEED: int = experiment_config["SEED"]
+
+# PROFILING
+profiling_config = get_video_profiling_config()
 LOG_DIR = profiling_config["LOG_DIR"]
 BATCH_SIZE_OPTIONS: List[int] = profiling_config["BATCH_SIZE_OPTIONS"]
 NUM_WORKERS_OPTIONS: List[int] = profiling_config["NUM_WORKERS_OPTIONS"]
@@ -35,6 +40,10 @@ if __name__ == "__main__":
     import json
 
     import torch
+
+    video_config = get_video_config()
+    dataset_config = get_video_dataset_config()
+    runtime_config = get_video_runtime_config()
 
     torch.set_float32_matmul_precision(runtime_config["FLOAT32_MATMUL_PRECISION"])
 

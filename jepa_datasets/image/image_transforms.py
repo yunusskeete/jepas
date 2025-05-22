@@ -2,7 +2,9 @@ from typing import List, Optional
 
 from torchvision import transforms
 
-from configs import image_dataset_transforms_config as transforms_config
+from configs import get_image_dataset_transforms_config
+
+transforms_config = get_image_dataset_transforms_config()
 
 transforms_pre_filtering: List[Optional[transforms.Compose]] = [
     (
@@ -19,8 +21,8 @@ transforms_pre_filtering: List[Optional[transforms.Compose]] = [
     (  # Normalize using ImageNet mean and std
         transforms.Normalize(mean=mean, std=std)
         if (
-            (mean := transforms_config.get("NORMALIZE"))
-            and (std := transforms_config.get("NORMALIZE"))
+            (mean := transforms_config.get("NORMALIZE", {}).get("MEAN"))
+            and (std := transforms_config.get("NORMALIZE", {}).get("STD"))
         )
         else None
     ),

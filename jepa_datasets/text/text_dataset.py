@@ -1,8 +1,10 @@
 from datasets import Dataset
 from torch.utils.data import Dataset as TorchDataset
 
-from configs import text_dataset_config as dataset_config
-from configs import text_experiment_config as experiment_config
+from configs import get_text_dataset_config, get_text_experiment_config
+
+dataset_config = get_text_dataset_config()
+experiment_config = get_text_experiment_config()
 
 
 class TextDataset(TorchDataset):

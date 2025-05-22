@@ -5,9 +5,11 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader
 
-from configs import video_dataset_config as dataset_config
+from configs import get_video_dataset_config
 
 from .video_dataset import VideoDataset
+
+dataset_config = get_video_dataset_config()
 
 
 class VideoDataModule(pl.LightningDataModule):

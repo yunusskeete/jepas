@@ -3,8 +3,9 @@ from typing import Dict, List
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from configs import text_dataset_config as dataset_config
+from configs import get_text_dataset_config
 
+dataset_config = get_text_dataset_config()
 PAD_TOKEN_ID: int = dataset_config["PAD_TOKEN_ID"]
 
 

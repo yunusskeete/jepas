@@ -2,15 +2,18 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from configs import video_config
-from configs import video_experiment_config as experiment_config
-from configs import video_runtime_config as runtime_config
-from configs import video_tracking_config as tracking_config
+from configs import (
+    get_video_experiment_config,
+    get_video_runtime_config,
+    get_video_tracking_config,
+    video_config,
+)
 from jepa_datasets import VideoDataModule, create_video_datamodule
 from model import VJEPA
 from model.video import vjepa_model_builders
 
 # EXPERIMENT
+experiment_config = get_video_experiment_config()
 MODEL_NAME: str = experiment_config["MODEL_NAME"]
 MODEL_SIZE: str = experiment_config["MODEL_SIZE"]
 LR: float = experiment_config["LR"]
@@ -19,6 +22,7 @@ MAX_EPOCHS: int = experiment_config["MAX_EPOCHS"]
 GRADIENT_CLIP_VAL: float = experiment_config["GRADIENT_CLIP_VAL"]
 
 # TRACKING
+tracking_config = get_video_tracking_config()
 LOG_DIR: str = tracking_config["LOG_DIR"]
 LOGGING_INTERVAL: str = tracking_config["LOGGING_INTERVAL"]
 TOK_K_CHECKPOINTS: int = tracking_config["TOK_K_CHECKPOINTS"]
@@ -28,6 +32,7 @@ CHECKPOINT_MODE: str = tracking_config["CHECKPOINT_MODE"]
 VAL_CHECK_INTERVAL: float = tracking_config["VAL_CHECK_INTERVAL"]
 
 # RUNTIME
+runtime_config = get_video_runtime_config()
 ACCELERATOR: str = runtime_config["ACCELERATOR"]
 DEVICES: int = runtime_config["DEVICES"]
 PRECISION: int = runtime_config["PRECISION"]

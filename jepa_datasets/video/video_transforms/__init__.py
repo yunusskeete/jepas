@@ -3,10 +3,12 @@ from typing import List, Optional
 
 from torchvision import transforms
 
-from configs import video_dataset_transforms_config as transforms_config
+from configs import get_video_dataset_transforms_config
 
 from .transforms import VideoTransform
 from .transforms import make_transforms as _make_transforms
+
+transforms_config = get_video_dataset_transforms_config()
 
 
 def make_transforms() -> VideoTransform:

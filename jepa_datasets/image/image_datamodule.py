@@ -4,9 +4,11 @@ from typing import Any, Dict, List, Union
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
-from configs import image_dataset_config as dataset_config
+from configs import get_image_dataset_config
 
 from .image_dataset import ImageDataset
+
+dataset_config = get_image_dataset_config()
 
 
 class ImageDataModule(pl.LightningDataModule):

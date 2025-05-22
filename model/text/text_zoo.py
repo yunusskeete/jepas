@@ -7,11 +7,13 @@ from transformers.models.bert import BertEmbeddings
 from x_transformers import Decoder
 from x_transformers.x_transformers import ScaledSinusoidalEmbedding
 
-from configs import text_experiment_config as experiment_config
+from configs import get_text_experiment_config
 from model.model import TJEPA
 from model.seed import seed_everything
 
 from .text_encoder import TextEncoder, create_text_encoder
+
+experiment_config = get_text_experiment_config()
 
 # pylint: disable=redefined-outer-name
 
