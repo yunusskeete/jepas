@@ -1,9 +1,9 @@
 # Tests
 
 ## Data
-[ ] - Image dataset
-[ ] - Video dataset
-[ ] - Text dataset
+[X] - Image dataset
+[X] - Video dataset
+[X] - Text dataset
 
 ## Profiling
 [ ] - Image profiling

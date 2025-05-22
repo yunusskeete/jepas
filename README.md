@@ -22,6 +22,16 @@ The JEPA paradigm takes this one step further - it incentivises the learning of 
 The scripts in this repo are heavily dependent on JSON configurations.
 These must be set up before execution.
 
+### Datasets
+This repo has (optional) placeholder folders for organising local datasets.
+Datasets **do not** need to be physically stored within these fodlers - instead, you can **link externat dataset locations** using symbolic links.
+
+For example:
+```bash
+ln -s /path/to/data/video/kinetics /path/to/jepas/data/video/kinetics
+```
+
+
 ### E.g. I-JEPA Pretraining
 After setting up the config and dataset, running a pretraining job cam be executed with the following command:
 ```bash

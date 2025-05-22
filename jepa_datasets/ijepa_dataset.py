@@ -10,6 +10,8 @@ from pathlib import Path
 from torch.utils.data import DataLoader
 
 if __name__ == "__main__":
+    import gc
+
     from configs import get_image_config, get_image_dataset_config
     from jepa_datasets.image import (
         ImageDataModule,
@@ -26,27 +28,40 @@ if __name__ == "__main__":
 
     dataset_path: Path = Path(dataset_config["DATASET_PATH"]).resolve()
 
-    test_ijepa_loader = DataLoader(
-        ImageDataset(dataset_path, stage="test"), batch_size=32, shuffle=False
-    )
+    # 1. Load test dataset
+    test_dataset: ImageDataset = ImageDataset(dataset_path, stage="test")
+    print("✅ Test dataset loaded")
+
+    # 2. Load test dataloader
+    test_ijepa_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
     print("✅ Test dataloader loaded")
 
-    # Example of iterating through the test data
+    # 3. Iterate through the test data
     image = next(iter(test_ijepa_loader))
     print(f"{image.shape=}")  # Should print torch.Size([32, 3, img_height, img_width])
     print("✅ Sample check passed")
 
+    # 4. Load datamodule
     datamodule: ImageDataModule = create_image_datamodule(image_config=image_config)
-    datamodule.setup()
     print("✅ Datamodule loaded")
+
+    # 5. Load validation dataloader
+    datamodule.setup()
 
     val_dataloader: DataLoader = datamodule.val_dataloader()
     print("✅ Dataloader loaded")
 
-    # Example of iterating through the validation data
+    # 6. Iterate through the validation data
     for image in val_dataloader:
         print(
             f"{image.shape=}"
         )  # Should print torch.Size([32, 3, img_height, img_width])
         print("✅ Sample check passed")
         break
+
+    # 7. Cleanup
+    del test_dataset
+    del test_ijepa_loader
+    del datamodule
+    del val_dataloader
+    gc.collect()

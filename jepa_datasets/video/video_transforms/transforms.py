@@ -34,6 +34,7 @@ def make_transforms(
         crop_size=crop_size,
         normalize=normalize,
     )
+
     return _frames_augmentation
 
 

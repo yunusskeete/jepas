@@ -1,7 +1,4 @@
 from fractions import Fraction
-from typing import List, Optional
-
-from torchvision import transforms
 
 from configs import get_video_dataset_transforms_config
 
@@ -12,12 +9,15 @@ transforms_config = get_video_dataset_transforms_config()
 
 
 def make_transforms() -> VideoTransform:
+    print(transforms_config["RANDOM_RESIZE_ASPECT_RATIO"])
     return _make_transforms(
         random_horizontal_flip=transforms_config["RANDOM_HORIZONTAL_FLIP"],
-        random_resize_aspect_ratio=Fraction(
-            transforms_config["RANDOM_RESIZE_ASPECT_RATIO"]
+        random_resize_aspect_ratio=(
+            Fraction(x) for x in transforms_config["RANDOM_RESIZE_ASPECT_RATIO"]
         ),
-        random_resize_scale=transforms_config["RANDOM_RESIZE_SCALE"],
+        random_resize_scale=(
+            Fraction(x) for x in transforms_config["RANDOM_RESIZE_SCALE"]
+        ),
         reprob=transforms_config["REPROB"],
         auto_augment=transforms_config["AUTO_AUGMENT"],
         motion_shift=transforms_config["MOTION_SHIFT"],

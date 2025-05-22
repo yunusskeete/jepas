@@ -10,7 +10,7 @@
             "LAYER_DROPOUT": 0.1
         },
         "dataset": {
-            "DATASET_PATH": "./data/imagenet/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC",
+            "DATASET_PATH": "./data/image/imagenet/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC",
             "ACCEPTABLE_FILE_EXTENSIONS": [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"],
             "SHUFFLE_DATASET": true,
             "transforms": {
@@ -89,11 +89,11 @@
             "MAX_VIDEO_DURATION": null,
             "transforms": {
                 "RANDOM_HORIZONTAL_FLIP": true,
-                "RANDOM_RESIZE_ASPECT_RATION": ["3/4", "4/3"],
+                "RANDOM_RESIZE_ASPECT_RATIO": ["3/4", "4/3"],
                 "RANDOM_RESIZE_SCALE": [0.4, 1.0],
                 "REPROB": 0.0,
-                "auto_augment": false,
-                "motion_shift": false,
+                "AUTO_AUGMENT": false,
+                "MOTION_SHIFT": false,
                 "CROP_SIZE": 224
             }
         },
@@ -163,7 +163,7 @@
         "dataset": {
             "UNTOKENIZED_DATASET_NAME": "bookcorpus",
             "UNTOKENIZED_DATASET_SPLIT": "train",
-            "TOKENIZED_DATASET_NAME": "/home/yunusskeete/Documents/data/text/tokenized_bookcorpus",
+            "TOKENIZED_DATASET_NAME": "./data/text/tokenized_bookcorpus",
             "TOKENIZER_MODEL_NAME": "bert-base-uncased",
             "SHUFFLE_DATASET": true,
             "TEST_SPLIT": 0.02,

@@ -9,16 +9,20 @@ from typing import Dict, List, Union
 
 import torch
 
-from configs import get_text_dataset_config, get_text_experiment_config
-
 from .text.padding import dynamic_padding_collate
 from .text.text_datamodule import PreTokenizedTextDataset, TextDataModule, TextDataset
 
 if __name__ == "__main__":
     import gc
 
-    dataset_config = get_text_dataset_config
-    experiment_config = get_text_experiment_config
+    from configs import get_text_dataset_config, get_text_experiment_config
+
+    dataset_config = get_text_dataset_config()
+    experiment_config = get_text_experiment_config()
+    experiment_config["NUM_WORKERS"] = 0
+    experiment_config["PREFETCH_FACTOR"] = None
+    experiment_config["PERSISTENT_WORKERS"] = False
+    experiment_config["PIN_MEMORY"] = False
 
     # 1. Load datamodule
     use_pre_tokenized_dataset: bool = dataset_config["USE_PRE_TOKENIZED_DATASET"]

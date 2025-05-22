@@ -65,7 +65,7 @@ def get_image_dataset_transforms_config() -> Dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def get_video_config() -> Dict[str, Any]:
-    return get_get_config()["video"]
+    return get_config()["video"]
 
 
 @lru_cache(maxsize=1)
@@ -112,7 +112,7 @@ def get_video_dataset_transforms_config() -> Dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def get_text_config() -> Dict[str, Any]:
-    return get_get_config()["text"]
+    return get_config()["text"]
 
 
 @lru_cache(maxsize=1)
