@@ -20,3 +20,8 @@
 - [ ] Image pretraining
 - [ ] Video pretraining
 - [ ] Text pretraining
+
+## Finetuning
+- [ ] Image finetuning
+- [ ] Video finetuning
+- [ ] Text finetuning
