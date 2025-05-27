@@ -1,19 +1,19 @@
 # Tests
 
 ## Model
-[X] - ViT zoo
-[X] - IJEPA zoo
-[X] - VJEPA zoo
-[X] - TJEPA zoo
+[x] - ViT zoo
+[x] - IJEPA zoo
+[x] - VJEPA zoo
+[x] - TJEPA zoo
 
 ## Data
-[X] - Image dataset
-[X] - Video dataset
-[X] - Text dataset
+[x] - Image dataset
+[x] - Video dataset
+[x] - Text dataset
 
 ## Profiling
-[X] - Image profiling
-[X] - Video profiling
+[x] - Image profiling
+[x] - Video profiling
 [ ] - Text profiling
 
 ## Pretraining
