@@ -3,7 +3,7 @@ Un-official PyTorch implementations of:
 - [x] I-JEPA: [Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture](https://arxiv.org/abs/2301.08243)
 - [x] V-JEPA: [Revisiting Feature Prediction for Learning Visual Representations from Video](https://arxiv.org/abs/2404.08471)
 - [x] T-JEPA: Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture (Original Works)
-- [*] A-JEPA: Self-Supervised Learning from Audio with a Joint-Embedding Predictive Architecture (Original Works)
+- [ ] (In progress) A-JEPA: Self-Supervised Learning from Audio with a Joint-Embedding Predictive Architecture (Original Works)
 - [ ] MC-JEPA: [MC-JEPA: A Joint-Embedding Predictive Architecture for Self-Supervised Learning of Motion and Content Features](https://arxiv.org/abs/2307.12698)
 - [ ] Graph-JEPA: [Graph-level Representation Learning with Joint-Embedding Predictive Architectures](https://arxiv.org/abs/2309.16014)
 
