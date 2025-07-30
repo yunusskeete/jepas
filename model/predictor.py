@@ -2,7 +2,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from x_transformers import Decoder
+from x_transformers import Encoder
 
 
 class Predictor(nn.Module):
@@ -38,7 +38,7 @@ class Predictor(nn.Module):
             that the predictor dimension will be the same as the embedding dimension.
 
     Attributes:
-        decoder (x_transformers.Decoder):
+        decoder (x_transformers.Encoder):
             The transformer decoder responsible for processing the concatenated context and target embeddings. It captures
             the dependencies within the target patches and between the target and context patches.
 
@@ -75,7 +75,7 @@ class Predictor(nn.Module):
     ):
         super().__init__()
         # Initialize the transformer-based decoder
-        self.decoder = Decoder(
+        self.decoder = Encoder(
             dim=embed_dim, depth=depth, heads=num_heads, layer_dropout=layer_dropout
         )
 
