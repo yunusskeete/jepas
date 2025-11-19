@@ -15,7 +15,7 @@ The JEPA paradigm takes this one step further - it incentivises the learning of 
   After interpreting a signal, the model tests itself by predicting *its own interpretation of the input signal* - thus it learns to structure its percepts, and learns to the structure of its internal model of the structured external world - developing a progressively more sophisticated "world model".
 
 ## Image-JEPA Schematic:
-![](IJEPA.png)
+![](assets/IJEPA.png)
 
 ## Usage:
 ### Configs
@@ -45,11 +45,13 @@ Much of the pretraining scripts in this repo can then serve as boilerplate for d
 For inspiration, see [gaasher](https://github.com/gaasher)'s [`finetune_IJEPA.py`](https://github.com/gaasher/I-JEPA/blob/main/finetune_IJEPA.py).
 
 ## Supervised Research Projects
-I [Yunus Skeete](https://www.linkedin.com/in/yunus-skeete/) supervise academic research projects into JEPAs and World Models, using this repo for illustrative purposed.
+I, [Yunus Skeete](https://www.linkedin.com/in/yunus-skeete/), supervise academic research projects into JEPAs and World Models, using this repo for illustrative purposed.
 Example projects include:
 - TR-JEPA: "Can a unified image-video architecture leverage the spatiotemporal dynamics of video as an inductive bias to self-distill temporal representations into static image embeddings (spatial), enabling temporal reasoning from single frames?" (Ahmad Ajmal | Middlesex University, SpaceForm Technologies | 2024)
-- IA-JEPA: "Can energy-based masked latent prediction can serve as a general-purpose mechanism for aligning visual and auditory modalities in multi-modal JEPAs? Do the spatial inductive biases of masked image modeling contribute to spatial alignment and assist visual sound localisation?" (Florence Lei | University of Bristol, Spatial Intelligence | 2025)
-- ID-JEPA: "To what extent can variational regularisation of latent spaces of latent self-supervised predictive models assist multi-modal JEPA models in learning RGB-image-grounded internal representations that reflect depth, geometric and semantic understanding of the 3D world?" (Tung Lam | University of Bristol, Spatial Intelligence | 2025)
+- IA-JEPA: "Can energy-based masked latent prediction can serve as a general-purpose mechanism for aligning visual and auditory modalities in multi-modal JEPAs? Do the spatial inductive biases of masked image modeling contribute to spatial alignment and assist visual sound localisation?" (Florence Lei | University of Bristol, [Spatial Intelligence](https://www.spatial-intelligence.co.uk/) | 2025)
+  ![](assets/IAJEPA.png)
+- ID-JEPA: "To what extent can variational regularisation of latent spaces of latent self-supervised predictive models assist multi-modal JEPA models in learning RGB-image-grounded internal representations that reflect depth, geometric and semantic understanding of the 3D world?" (Tung Lam | University of Bristol, [Spatial Intelligence](https://www.spatial-intelligence.co.uk/) | 2025)
+  ![](assets/DepthJEPA.png)
 
 ## Acknowledgements
 - The implementations in this repo were inspired by [gaasher](https://github.com/gaasher/I-JEPA/tree), and utilise [@lucidrains](https://github.com/lucidrains) x-transfromers (https://github.com/lucidrains/x-transformers).
